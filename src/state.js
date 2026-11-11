@@ -1,15 +1,20 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=82";
+import { calculateDemand, emptyDemand } from "./demand.js?v=163";
 import {
   basementCount,
   clampCore,
   clampOpening,
   defaultCore,
   defaultRampLength,
+  FLOOR_H,
+  minStraightRampLength,
+  rampTransitions,
   generateVariants,
   intervalsOverlap,
   layoutParking,
   referenceCase,
-} from "./layout.js?v=84";
+  searchPlacement,
+  snapCore,
+} from "./layout.js?v=163";
 
 export const state = {
   step: 1,
@@ -22,14 +27,28 @@ export const state = {
   columnSpacing: 8.1,
   columnWidth: 0.5,
   columnDepth: 0.5,
-  minClear: 0.05,
+  minClear: 0,   // 기둥 면과 주차칸 선 사이 여유. 법정 값 없음(칸 크기만 확보하면 됨).
   siteMargin: 20,
+  siteMargins: { n: null, s: null, e: null, w: null },
+  roadEdge: "w",   // 도로에 접한 변: 램프·출입구를 이 변에 둔다
+  coreAuto: true,  // 평면 만들기 때 코어 자리를 자동 탐색(평면에서 코어를 직접 옮기면 끔)
+  rampPos: "auto", // 그 변 안 램프 위치: auto(대수 최대) · start(서/남 끝) · mid · end(동/북 끝)   // 방향별 대지 여유(비우면 공통 값)
+  // 장애인전용 주차구획. 적용 대상인지는 법정 대수(10대 이상)로 판단한다.
+  stallRules: { disabled: true, disabledRate: 0.03 },
   rampPlacement: "internal",
   entranceMode: "separate",
   circulation: "ccw",
   entranceWidth: 6,
   rampWidth: 6,
-  rampLength: 18.9,
+  rampLength: minStraightRampLength(),
+  // 도로와 접하는 부분부터 3m는 8.5% 이하 (주차장법 시행규칙 제6조①5바)
+  // 층고(m). 유효높이 = 층고 − 슬래브 0.28m가 차로 기준 2.3m 이상이어야 한다.
+  floorHeight: 3.2,
+  // 기둥 간격을 가로·세로 따로 쓸 때 (예: "8.1,8.4,9"). 비우면 columnSpacing 하나로.
+  spansX: "",
+  spansY: "",
+  // 막다른 차로 정리 + 진입 불가 칸 제외
+  trimDeadEnds: true,
   plate: null,
   columns: [],
   stalls: [],
@@ -74,7 +93,7 @@ export function emit() {
   listeners.forEach((listener) => listener());
 }
 
-function plateFromState() {
+export function plateFromState() {
   return {
     width: round1(state.parkWidth),
     depth: round1(state.parkDepth),
@@ -83,8 +102,40 @@ function plateFromState() {
     columnDepth: round1(state.columnDepth),
     minClear: round1(state.minClear * 100) / 100,
     siteMargin: round1(state.siteMargin),
+    siteMargins: state.siteMargins,
     rampPlacement: state.rampPlacement,
+    roadEdge: state.roadEdge,
+    stallRules: currentStallRules(),
+    spansX: parseSpans(state.spansX).values,
+    spansY: parseSpans(state.spansY).values,
+    trimDeadEnds: state.trimDeadEnds,
+    floorHeight: state.floorHeight,
+    // 경사로 완화구간 기준(별표 1)은 법정 주차대수로 판단한다
+    legalStalls: calculateDemand(state.demand, null, state.columnSpacing).legalStalls,
   };
+}
+
+/**
+ * "8.1, 8.4, 9" → { values: [8.1, 8.4, 9], error: "" }. 비어 있으면 values null(기둥 간격 하나 사용).
+ * 각 값은 3~15m. 잘못되면 values null과 error 문구.
+ */
+export function parseSpans(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { values: null, error: "" };
+  const values = [];
+  for (const part of raw.split(/[,\s]+/).filter(Boolean)) {
+    const value = Number(part);
+    if (!Number.isFinite(value)) return { values: null, error: `숫자가 아닌 값 "${part}"` };
+    if (value < 3 || value > 15) return { values: null, error: `${part}m는 3~15m 범위 밖` };
+    values.push(value);
+  }
+  return { values, error: "" };
+}
+
+/** 화면 설정 + 법정 필요 대수·세대수 → 배치 엔진에 넘길 구획 규칙 */
+export function currentStallRules() {
+  const demand = calculateDemand(state.demand, null, state.columnSpacing);
+  return { ...state.stallRules, legalStalls: demand.legalStalls };
 }
 
 function syncCore() {
@@ -118,9 +169,10 @@ function adopt(result, keepObjects) {
   }
 }
 
-export function refreshVariants() {
+export function refreshVariants(lockRamp = false) {
   if (!state.plate) return;
   state.variants = generateVariants({
+    lockRamp,
     plate: state.plate,
     cores: state.cores,
     openings: state.openings,
@@ -161,32 +213,119 @@ export function rebuildLayout() {
     },
   });
   adopt(result, true);
+  // 레이아웃이 램프 위치·폭을 보정했으면(벽에 붙이기, 곡선 6.5m) 화면의 램프도 맞춘다.
+  (result.ramps || []).forEach((fixed) => {
+    const mine = state.ramps.find((ramp) => ramp.id === fixed.id);
+    if (mine) { mine.t = fixed.t; mine.width = fixed.width; }
+  });
+  state.openings = result.openings;
 }
 
 function seedAccess() {
+  // 램프는 조건 단계에서 고른 도로 접한 변의 가운데에서 시작한다(배치안이 그 변 안에서 위치를 다듬음).
+  const edge = state.roadEdge || "w";
+  const along = edge === "n" || edge === "s" ? state.plate.width : state.plate.depth;
+  if (state.ramps.length && state.ramps[0].edge !== edge) state.ramps = [];
+  const pos = state.rampPos === "auto" ? "start" : state.rampPos;
   if (!state.ramps.length) {
-    const edge = "w";
     state.ramps = [{
       id: state.nextId++,
       edge,
-      t: round1(state.plate.depth / 2),
+      t: round1(along / 2),
+      pos,
       width: state.rampWidth,
       length: defaultRampLength(state.plate, edge),
       placement: state.rampPlacement,
     }];
   } else {
-    state.ramps = state.ramps.map((ramp) => ({ ...ramp, placement: state.rampPlacement }));
+    state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos, placement: state.rampPlacement }));
   }
+}
+
+
+// 코어 자리 자동 탐색: 기둥 격자 칸을 모두 돌려 보고, 지금 자리보다 추천안 대수가 많으면 옮긴다.
+function searchCore() {
+  state.coreSearch = null;
+  if (state.coreAuto && state.cores.length === 1 && state.cores[0].grid !== false) {
+    const pos = state.ramps[0]?.pos || null;
+    const found = searchPlacement({
+      plate: state.plate,
+      cores: state.cores,
+      openings: state.openings,
+      ramps: state.ramps,
+      rampPlacement: state.rampPlacement,
+      entranceMode: state.entranceMode,
+    }, pos ? [pos] : null);
+    if (found && found.cores && found.cores[0]) {
+      const recOf = (list) => list.find((v) => v.recommended) || list[0];
+      const valueOf = (v) => (v ? (v.metrics.valid ? 100000 : 0) + v.metrics.stalls : -1);
+      const before = recOf(state.variants);
+      const keep = { cores: state.cores, variants: state.variants };
+      state.cores = found.cores.map((core) => ({ ...core }));
+      refreshVariants();
+      const after = recOf(state.variants);
+      if (valueOf(after) > valueOf(before)) {
+        state.coreSearch = { before: before.metrics.stalls, after: after.metrics.stalls };
+      } else {
+        state.cores = keep.cores;
+        state.variants = keep.variants;
+      }
+      syncCore();
+    }
+  }
+}
+
+export function autoPlaceCore() {
+  if (!state.plate) return;
+  state.coreAuto = true;
+  refreshVariants();
+  searchCore();
+  const best = Math.max(0, state.variants.findIndex((variant) => variant.recommended));
+  applyVariant(best);
 }
 
 export function generatePlate() {
   state.plate = plateFromState();
+  // 램프 길이는 층고·법정 대수(완화구간)로 정한 최소 길이보다 짧으면 안 된다.
+  const autoLength = minStraightRampLength(state.floorHeight, rampTransitions({ legalStalls: state.plate.legalStalls }));
+  if (!(state.rampLength >= autoLength - 0.05)) state.rampLength = autoLength;
+  state.ramps = state.ramps.map((ramp) => (ramp.length >= autoLength - 0.05 ? ramp : { ...ramp, length: autoLength }));
   if (!state.cores.length) state.cores = [defaultCore(state.plate)];
-  state.cores = state.cores.map((core) => clampCore(core, state.plate));
+  // 격자 맞춤 코어는 기둥 간격이 바뀌었어도 같은 칸 수로 다시 맞춘다.
+  state.cores = state.cores.map((core) => {
+    if (core.grid === false) return clampCore(core, state.plate);
+    const step = state.plate.spacing || 8.1;
+    const nx = core.nx || 1;
+    const ny = core.ny || 1;
+    const sized = { ...core, nx, ny, w: nx * step - state.plate.columnWidth, d: ny * step - state.plate.columnDepth, grid: true };
+    return clampCore(snapCore(clampCore(sized, state.plate), state.plate), state.plate);
+  });
   syncCore();
   seedAccess();
   state.referenceNotes = [];
   refreshVariants();
+  if (state.rampPos === "auto") {
+    // 도로변 안에서 끝·가운데·끝을 모두 돌려 보고 추천안 대수가 가장 많은 위치를 쓴다.
+    const scoreOf = () => {
+      const v = state.variants.find((item) => item.recommended) || state.variants[0];
+      return v ? (v.metrics.valid ? 100000 : 0) + v.metrics.stalls : -1;
+    };
+    let bestPos = "start";
+    let bestScore = scoreOf();
+    let bestVariants = state.variants;
+    ["mid", "end"].forEach((pos) => {
+      state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos }));
+      refreshVariants();
+      const score = scoreOf();
+      if (score > bestScore) { bestScore = score; bestPos = pos; bestVariants = state.variants; }
+    });
+    state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos: bestPos }));
+    state.variants = bestVariants;
+    state.autoRampPos = bestPos;
+  } else {
+    state.autoRampPos = null;
+  }
+  searchCore();
   const best = Math.max(0, state.variants.findIndex((variant) => variant.recommended));
   state.step = 2;
   state.revealStage = 6;
@@ -204,10 +343,13 @@ export function loadReference() {
   state.minClear = sample.minClear;
   state.siteMargin = sample.siteMargin;
   state.rampPlacement = sample.rampPlacement;
+  state.coreAuto = false;
+  state.roadEdge = sample.ramp?.edge || "w";
   state.entranceMode = sample.entranceMode;
-  state.circulation = sample.circulation;
+  state.circulation = "ccw";
   state.rampWidth = sample.ramp.width;
-  state.rampLength = sample.ramp.length;
+  // 기준 사례의 램프 길이도 층고와 도로변 완경사 규정으로 다시 계산한다.
+  state.rampLength = minStraightRampLength(state.floorHeight, rampTransitions({ legalStalls: calculateDemand(state.demand, null, state.columnSpacing).legalStalls }));
   state.entranceWidth = sample.ramp.width;
   state.demand.projectName = sample.projectName;
   state.referenceNotes = sample.notes.slice();
@@ -227,6 +369,7 @@ export function loadReference() {
   state.ramps = [{
     id: state.nextId++,
     ...sample.ramp,
+    length: state.rampLength,
     placement: "external",
   }];
   state.selection = null;
@@ -285,6 +428,8 @@ export function summary() {
     connected: state.connected,
     similarity: metrics ? metrics.similarity : 0,
     aisleRatio: metrics ? metrics.aisleRatio : 0,
+    stallTypes: metrics ? metrics.stallTypes : null,
+    stallTargets: metrics ? metrics.stallTargets : null,
     demand,
   };
 }
@@ -292,7 +437,17 @@ export function summary() {
 export function updateCore(partial) {
   const current = state.cores[state.coreIndex];
   if (!current || !state.plate) return;
-  const next = clampCore({ ...current, ...partial }, state.plate);
+  state.coreAuto = false;   // 직접 손댄 코어는 다음 평면 만들기 때 자동으로 옮기지 않는다
+  // 가로·세로를 m로 직접 넣으면 격자 맞춤을 끄고, 칸 수를 고르면 다시 켠다.
+  const merged = { ...current, ...partial };
+  if (partial.w != null || partial.d != null) { merged.grid = false; delete merged.nx; delete merged.ny; }
+  if (partial.nx != null || partial.ny != null) {
+    merged.grid = true;
+    const step = state.plate.spacing || 8.1;
+    merged.w = (merged.nx || 1) * step - (state.plate.columnWidth || 0.5);
+    merged.d = (merged.ny || 1) * step - (state.plate.columnDepth || 0.5);
+  }
+  const next = clampCore(snapCore(clampCore(merged, state.plate), state.plate), state.plate);
   if (![next.x, next.y, next.w, next.d].every(Number.isFinite)) return;
   state.cores[state.coreIndex] = next;
   syncCore();
@@ -330,7 +485,7 @@ export function updateCoreArea(area) {
 }
 
 export function placeOpening(kind, edge, t) {
-  if (state.entranceMode === "integrated") return;
+  if (state.entranceMode === "integrated" || state.rampPlacement !== "external") return;
   const opening = clampOpening({
     id: state.nextId++,
     kind,
@@ -356,10 +511,13 @@ export function moveOpening(id, edge, t) {
 }
 
 export function placeRamp(edge, t) {
+  // 램프는 2차로 양방향 하나만 둔다. 이미 있으면 새로 만들지 않고 그 램프를 옮긴다.
   const length = defaultRampLength(state.plate, edge);
   state.rampLength = length;
+  const keepId = state.ramps.length ? state.ramps[0].id : state.nextId++;
+  state.openings = state.openings.filter((opening) => !opening.linkedRamp || opening.linkedRamp === keepId);
   const ramp = clampOpening({
-    id: state.nextId++,
+    id: keepId,
     edge,
     t,
     width: state.rampWidth,
@@ -367,7 +525,7 @@ export function placeRamp(edge, t) {
     placement: state.rampPlacement,
   }, state.plate);
   ramp.placement = state.rampPlacement;
-  state.ramps.push(ramp);
+  state.ramps = [ramp];
   if (state.entranceMode === "integrated") syncIntegrated(ramp);
   state.selection = { type: "ramp", id: ramp.id };
   rebuildLayout();
@@ -381,6 +539,7 @@ export function moveRamp(id, edge, t) {
     ...state.ramps[index],
     edge,
     t,
+    pos: null,   // 직접 끌어 놓은 위치를 그대로 쓴다
     placement: state.rampPlacement,
   }, state.plate);
   state.ramps[index].placement = state.rampPlacement;
@@ -470,7 +629,7 @@ export function removeSelection() {
 }
 
 export function placeSplitExample() {
-  if (!state.plate) return;
+  if (!state.plate || state.rampPlacement !== "external") return;
   state.entranceMode = "separate";
   state.openings = [];
   const width = state.plate.width;
@@ -519,4 +678,27 @@ function accessLabel() {
 
 function round1(value) {
   return Math.round(value * 10) / 10;
+}
+
+/**
+ * 코어·램프를 끌어 놓은 뒤: 놓은 자리는 그대로 두고 6가지 배치를 다시 짜서 가장 좋은 안으로 바꾼다.
+ * (끄는 동안에는 현재 배치만 다시 계산하고, 손을 뗄 때 한 번만 전체를 다시 짠다)
+ */
+export function settleAfterDrag() {
+  if (!state.plate) return;
+  refreshVariants(true);
+  const best = Math.max(0, state.variants.findIndex((variant) => variant.recommended));
+  applyVariant(best);
+}
+
+// 대지 여유(공통·방향별)를 바꾸면 현재 평면에도 반영하고 램프 검사를 다시 한다.
+export function updateSiteMargins(common, perDir) {
+  if (common != null) state.siteMargin = common;
+  if (perDir) state.siteMargins = { ...state.siteMargins, ...perDir };
+  if (state.plate) {
+    state.plate.siteMargin = round1(state.siteMargin);
+    state.plate.siteMargins = state.siteMargins;
+    rebuildLayout();
+  }
+  emit();
 }

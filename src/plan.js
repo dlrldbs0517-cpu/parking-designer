@@ -1,5 +1,5 @@
-import { edgePoint, pickEdge, rampFootprint } from "./layout.js?v=84";
-import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, state, subscribe, updateCore } from "./state.js?v=84";
+import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=163";
+import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=163";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -90,7 +90,7 @@ export function mountPlan(canvas) {
 
     state.stalls.forEach((stall) => {
       if (!shown(stall.phase)) return;
-      ctx.fillStyle = "#f7f4ee";
+      ctx.fillStyle = stallFill(stall);
       ctx.strokeStyle = "#8a8478";
       ctx.lineWidth = 1 / camera.scale;
       ctx.fillRect(stall.x, stall.y, stall.w, stall.d);
@@ -98,6 +98,8 @@ export function mountPlan(canvas) {
       ctx.strokeStyle = "#3e6b4e";
       ctx.lineWidth = 1.6 / camera.scale;
       aisleMark(ctx, stall);
+      const tag = stallTag(stall);
+      if (tag && camera.scale > 6) label(ctx, tag, stall.x + stall.w / 2, stall.y + stall.d / 2, "#1f3a5f");
     });
     if (state.debugColumns) {
       (state.columnConflicts || []).forEach((stall) => {
@@ -111,15 +113,38 @@ export function mountPlan(canvas) {
 
     const blockedRamps = new Set(state.issues.filter((issue) => issue.type === "ramp").map((issue) => issue.id));
     state.ramps.forEach((ramp) => {
-      const footprint = rampFootprint(ramp, plate);
+      // 내부형은 직선 또는 직선+곡선(+직선) 모양. 외부형은 기존 사각형.
+      const shape = rampShape(ramp, plate);
       const selected = state.selection?.type === "ramp" && state.selection.id === ramp.id;
-      const blocked = blockedRamps.has(ramp.id);
+      const blocked = blockedRamps.has(ramp.id) || (shape.kind === "curved" && !shape.ok);
       ctx.fillStyle = blocked ? "rgba(180, 40, 32, 0.35)" : "rgba(168, 116, 42, 0.34)";
       ctx.strokeStyle = blocked ? "#b42318" : selected ? "#1e1a16" : "#a8742a";
       ctx.lineWidth = (blocked || selected ? 2.6 : 1.5) / camera.scale;
-      ctx.fillRect(footprint.x, footprint.y, footprint.w, footprint.d);
-      ctx.strokeRect(footprint.x, footprint.y, footprint.w, footprint.d);
-      label(ctx, "램프", footprint.x + footprint.w / 2, footprint.y + footprint.d / 2, "#7a5418");
+      shape.polygons.forEach((poly) => {
+        ctx.beginPath();
+        poly.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      });
+      if (shape.path.length > 1) {
+        ctx.save();
+        ctx.setLineDash([0.6, 0.5]);
+        ctx.lineWidth = 1 / camera.scale;
+        ctx.beginPath();
+        shape.path.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        ctx.stroke();
+        ctx.restore();
+      }
+      const first = shape.pieces[0];
+      label(ctx, shape.kind === "curved" ? "곡선 램프" : "램프", first.x + first.w / 2, first.y + first.d / 2, "#7a5418");
+      // 내부형: 모든 층에서 같은 위치. 순환 차로 모서리에서 들어가고(입구), 반대쪽 끝으로 도착한다.
+      if ((ramp.placement || "internal") === "internal" && shape.path.length > 1) {
+        const start = shape.path[0];
+        const end = shape.path[shape.path.length - 1];
+        label(ctx, "▼입출구", start.x, start.y, "#1f6b62");
+        label(ctx, "도착▶", end.x, end.y, "#b5522a");
+      }
     });
 
     state.cores.forEach((core, index) => {
@@ -148,10 +173,12 @@ export function mountPlan(canvas) {
     ctx.restore();
 
     const blockedOpenings = new Set(state.issues.filter((issue) => issue.type === "opening").map((issue) => issue.id));
-    state.openings.forEach((opening) => {
+    visibleOpenings().forEach((opening) => {
+      // 램프와 묶인 출입구는 입구·출구가 같은 자리라 "출입구" 하나만 그린다.
+      if (opening.linkedRamp && opening.kind === "out") return;
       const blocked = blockedOpenings.has(opening.id);
-      const color = blocked ? "#b42318" : opening.kind === "in" ? "#2f7a72" : "#b5522a";
-      const text = opening.kind === "in" ? "입구" : "출구";
+      const color = blocked ? "#b42318" : opening.linkedRamp ? "#2f7a72" : opening.kind === "in" ? "#2f7a72" : "#b5522a";
+      const text = opening.linkedRamp ? "출입구" : opening.kind === "in" ? "입구" : "출구";
       drawOpening(ctx, opening, color, text);
     });
     dimension(ctx, plate);
@@ -160,52 +187,66 @@ export function mountPlan(canvas) {
     drawRoute(ctx);
   };
 
+  // 모드 없이 바로 조작: 왼쪽 끌기 = 잡은 것(출입구·램프·코어)을 옮기고, 빈 곳이면 화면 이동.
+  // 휠 버튼·우클릭 끌기도 화면 이동. 입구·출구 추가 버튼이 켜져 있을 때만 외곽 클릭으로 추가한다.
+  const panStart = (event) => {
+    drag = { mode: "pan", x: event.clientX, y: event.clientY, cx: camera.x, cy: camera.y };
+    canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = "grabbing";
+  };
+  const hitAt = (world) => {
+    const opening = hitGate(world, visibleOpenings());
+    if (opening) return { type: "opening", opening };
+    const ramp = hitRamp(world);
+    if (ramp) return { type: "ramp", ramp };
+    const coreHit = state.cores.findIndex((core) => hit(world, core));
+    if (coreHit >= 0) return { type: "core", index: coreHit };
+    return null;
+  };
+
   canvas.addEventListener("pointerdown", (event) => {
     if (!state.plate) return;
     const world = screenToWorld(canvas, event.clientX, event.clientY);
-    if (event.button === 1 || event.button === 2 || state.tool === "pan") {
-      drag = { mode: "pan", x: event.clientX, y: event.clientY, cx: camera.x, cy: camera.y };
+    if (event.button === 1 || event.button === 2) { event.preventDefault(); panStart(event); return; }
+
+    const adding = state.tool === "entrance" || state.tool === "exit";
+    const target = hitAt(world);
+    if (target?.type === "opening") {
+      selectItem({ type: "opening", id: target.opening.id });
+      drag = { mode: "opening", id: target.opening.id };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
-
-    const opening = hitGate(world, state.openings);
-    if (opening && (state.tool === "entrance" || state.tool === "exit" || state.tool === "core")) {
-      selectItem({ type: "opening", id: opening.id });
-      drag = { mode: "opening", id: opening.id };
+    if (target?.type === "ramp" && !adding) {
+      selectItem({ type: "ramp", id: target.ramp.id });
+      drag = { mode: "ramp", id: target.ramp.id, edge: target.ramp.edge };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
-
-    const ramp = hitRamp(world);
-    if (ramp && state.tool !== "entrance" && state.tool !== "exit") {
-      selectItem({ type: "ramp", id: ramp.id });
-      drag = { mode: "ramp", id: ramp.id, edge: ramp.edge };
-      canvas.setPointerCapture(event.pointerId);
-      return;
-    }
-
-    const coreHit = state.cores.findIndex((core) => hit(world, core));
-    if (state.tool === "core" && coreHit >= 0) {
-      selectCore(coreHit);
-      selectItem({ type: "core", index: coreHit });
-      const core = state.cores[coreHit];
+    if (target?.type === "core" && !adding) {
+      selectCore(target.index);
+      selectItem({ type: "core", index: target.index });
+      const core = state.cores[target.index];
       drag = { mode: "core", dx: world.x - core.x, dy: world.y - core.y };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
-
-    const edge = pickEdge(world, state.plate);
-    if (!edge) return;
-    if (state.tool === "entrance") placeOpening("in", edge.edge, edge.t);
-    if (state.tool === "exit") placeOpening("out", edge.edge, edge.t);
-    if (state.tool === "ramp") placeRamp(edge.edge, edge.t);
+    if (adding) {
+      const edge = pickEdge(world, state.plate);
+      if (edge) { placeOpening(state.tool === "entrance" ? "in" : "out", edge.edge, edge.t); return; }
+    }
+    panStart(event);
   });
 
   canvas.addEventListener("pointermove", (event) => {
     const world = state.plate ? screenToWorld(canvas, event.clientX, event.clientY) : null;
     const readout = document.getElementById("readout");
     if (world) readout.textContent = `X ${world.x.toFixed(1)}  Y ${world.y.toFixed(1)} m`;
+    if (!drag && world) {
+      const adding = state.tool === "entrance" || state.tool === "exit";
+      const target = hitAt(world);
+      canvas.style.cursor = target ? "move" : adding && pickEdge(world, state.plate) ? "copy" : "grab";
+    }
     if (!drag || !world) return;
     if (drag.mode === "pan") {
       camera.x = drag.cx - (event.clientX - drag.x) / camera.scale;
@@ -231,7 +272,10 @@ export function mountPlan(canvas) {
   });
 
   canvas.addEventListener("pointerup", () => {
+    const moved = drag && (drag.mode === "core" || drag.mode === "ramp");
+    if (drag?.mode === "pan") canvas.style.cursor = "grab";
     drag = null;
+    if (moved) settleAfterDrag();
   });
 
   canvas.addEventListener("wheel", (event) => {
@@ -326,7 +370,7 @@ function hitGate(point, gates) {
 }
 
 function hitRamp(point) {
-  const body = state.ramps.find((ramp) => hit(point, rampFootprint(ramp, state.plate)));
+  const body = state.ramps.find((ramp) => rampShape(ramp, state.plate).pieces.some((piece) => hit(point, piece)));
   return body || hitGate(point, state.ramps);
 }
 
@@ -334,12 +378,32 @@ function projectAlong(edge, point) {
   return edge === "n" || edge === "s" ? point.x : point.y;
 }
 
+// 주차구획 색: 일반 · 확장형(연한 초록) · 장애인전용(파랑)
+function stallFill(stall) {
+  if (stall.type === "disabled") return "#b9d3f0";
+  if (stall.type === "extended") return "#dcebd6";
+  return "#f7f4ee";
+}
+
+function stallTag(stall) {
+  if (stall.type === "disabled") return "장";
+  if (stall.type === "extended") return "확";
+  return "";
+}
+
+// 카스토퍼(차막이): 차로 반대쪽(뒤쪽) 벽에서 0.9m 안쪽, 가운데 1.6m
 function aisleMark(ctx, stall) {
+  const back = 0.9;
   ctx.beginPath();
-  if (stall.aisle === "n") line(ctx, stall.x + 0.35, stall.y + stall.d - 0.25, stall.x + stall.w - 0.35, stall.y + stall.d - 0.25);
-  if (stall.aisle === "s") line(ctx, stall.x + 0.35, stall.y + 0.25, stall.x + stall.w - 0.35, stall.y + 0.25);
-  if (stall.aisle === "e") line(ctx, stall.x + stall.w - 0.25, stall.y + 0.35, stall.x + stall.w - 0.25, stall.y + stall.d - 0.35);
-  if (stall.aisle === "w") line(ctx, stall.x + 0.25, stall.y + 0.35, stall.x + 0.25, stall.y + stall.d - 0.35);
+  if (stall.aisle === "n" || stall.aisle === "s") {
+    const y = stall.aisle === "n" ? stall.y + back : stall.y + stall.d - back;
+    const cx = stall.x + stall.w / 2;
+    line(ctx, cx - 0.8, y, cx + 0.8, y);
+  } else {
+    const x = stall.aisle === "e" ? stall.x + back : stall.x + stall.w - back;
+    const cy = stall.y + stall.d / 2;
+    line(ctx, x, cy - 0.8, x, cy + 0.8);
+  }
 }
 
 function drawRoute(ctx) {
@@ -355,6 +419,7 @@ function drawRoute(ctx) {
       ctx.moveTo(segment.x1, segment.y1);
       ctx.lineTo(segment.x2, segment.y2);
       ctx.stroke();
+      if (segment.head === false) return;
       const angle = Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1);
       const size = 0.85;
       ctx.beginPath();
@@ -467,12 +532,12 @@ function dimension(ctx, plate) {
 }
 
 function drawSite(ctx, plate) {
-  const margin = plate.siteMargin || state.siteMargin || 0;
+  const m = siteMarginsOf({ siteMargin: state.siteMargin, ...plate, siteMargins: state.siteMargins });
   if (!state.ramps.some((ramp) => ramp.placement === "external")) return;
   ctx.save();
   ctx.strokeStyle = "#8a8175";
   ctx.lineWidth = 1 / camera.scale;
-  ctx.strokeRect(-margin, -margin, plate.width + margin * 2, plate.depth + margin * 2);
+  ctx.strokeRect(-m.w, -m.s, plate.width + m.w + m.e, plate.depth + m.s + m.n);
   ctx.restore();
 }
 
@@ -557,4 +622,9 @@ function paintNorth(ctx, rect) {
   ctx.textAlign = "center";
   ctx.fillText("N", 0, -26);
   ctx.restore();
+}
+
+// 내부 램프와 묶인 출입구는 벽에 표시하지 않는다(차는 벽이 아니라 램프로 드나든다).
+function visibleOpenings() {
+  return state.openings.filter((opening) => !(opening.linkedRamp && state.ramps.some((ramp) => ramp.id === opening.linkedRamp && (ramp.placement || "internal") !== "external")));
 }

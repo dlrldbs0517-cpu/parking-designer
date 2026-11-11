@@ -1,10 +1,12 @@
-import { AISLE, FLOOR_H, RAMP_SLOPE_STRAIGHT, rampFootprint } from "./layout.js?v=84";
+import { AISLE, RAMP_SLOPE_STRAIGHT, clearHeightOf, rampFootprint, siteMarginsOf, rampMainSlope, rampShape, rampTransitions } from "./layout.js?v=163";
 
 const EDGE = { n: "북", e: "동", s: "남", w: "서" };
 
-function slopePercent(ramp) {
+// 도로변 3m 완경사를 뺀 본 경사(%)
+function slopePercent(ramp, plate) {
   if (!ramp.length) return 0;
-  return (FLOOR_H / ramp.length) * 100;
+  const slope = rampMainSlope(ramp.length, plate ? rampTransitions(plate) : true, (plate && plate.floorHeight) || undefined);
+  return Number.isFinite(slope) ? slope * 100 : 999;
 }
 
 function uniqueSorted(values) {
@@ -24,7 +26,8 @@ export function renderSheet(paint, state, info, floorIndex) {
   }
 
   const rampBoxes = state.ramps.map((ramp) => rampFootprint(ramp, plate));
-  const minX = Math.min(0, ...rampBoxes.map((box) => box.x), -(plate.siteMargin || 0));
+  const sm = siteMarginsOf(plate);
+  const minX = Math.min(0, ...rampBoxes.map((box) => box.x), -(sm.w || 0));
   const minY = Math.min(0, ...rampBoxes.map((box) => box.y));
   const maxX = Math.max(plate.width, ...rampBoxes.map((box) => box.x + box.w));
   const maxY = Math.max(plate.depth, ...rampBoxes.map((box) => box.y + box.d));
@@ -42,8 +45,8 @@ export function renderSheet(paint, state, info, floorIndex) {
   paint.text(margin.l, 48, `${state.demand?.projectName || "주차장"}  지하 ${floorIndex + 1}층 평면도`, 20, "#111");
 
   const external = state.ramps.some((ramp) => ramp.placement === "external");
-  if (external && plate.siteMargin) {
-    paint.strokeRect(xOf(-plate.siteMargin), yOf(plate.depth + plate.siteMargin), (plate.width + plate.siteMargin * 2) * scale, (plate.depth + plate.siteMargin * 2) * scale, "#9aa3ad", 1);
+  if (external) {
+    paint.strokeRect(xOf(-sm.w), yOf(plate.depth + sm.n), (plate.width + sm.w + sm.e) * scale, (plate.depth + sm.s + sm.n) * scale, "#9aa3ad", 1);
   }
   paint.strokeRect(xOf(0), yOf(plate.depth), plate.width * scale, plate.depth * scale, "#111", external ? 1.2 : 2.2, external);
 
@@ -60,7 +63,8 @@ export function renderSheet(paint, state, info, floorIndex) {
 
   state.stalls.forEach((stall, index) => {
     paint.strokeRect(xOf(stall.x), yOf(stall.y + stall.d), stall.w * scale, stall.d * scale, "#222", 1);
-    paint.text(xOf(stall.x + stall.w / 2) - 8, yOf(stall.y + stall.d / 2) + 4, String(index + 1), 11, "#222");
+    const tag = stall.type === "disabled" ? "장" : stall.type === "extended" ? "확" : "";
+    paint.text(xOf(stall.x + stall.w / 2) - 8, yOf(stall.y + stall.d / 2) + 4, String(index + 1) + tag, 11, "#222");
   });
   state.columns.forEach((column, index) => {
     const sizeW = column.w || 0.5;
@@ -75,14 +79,23 @@ export function renderSheet(paint, state, info, floorIndex) {
     paint.text(xOf(core.x + core.w / 2) - 18, yOf(core.y + core.d / 2), `코어 ${index + 1}`, 12, "#111");
   });
   for (const ramp of state.ramps) {
-    const box = rampFootprint(ramp, plate);
-    paint.strokeRect(xOf(box.x), yOf(box.y + box.d), box.w * scale, box.d * scale, "#111", 1.6);
-    const percent = slopePercent(ramp);
-    const over = percent > RAMP_SLOPE_STRAIGHT * 100 + 0.05;
+    const shape = rampShape(ramp, plate);
+    let box = rampFootprint(ramp, plate);
+    let percent = slopePercent(ramp, plate);
+    let over = percent > RAMP_SLOPE_STRAIGHT * 100 + 0.05;
+    if (shape.kind === "curved") {
+      // 곡선 램프: 실제 모양을 그리고, 구간 중 가장 급한 경사를 적는다.
+      shape.polygons.forEach((poly) => paint.poly(poly.map((p) => [xOf(p.x), yOf(p.y)]), "#111", 1.6));
+      box = shape.pieces[0];
+      percent = Math.max(...shape.segments.map((seg) => (seg.slope || 0) * 100));
+      over = !shape.ok;
+    } else {
+      paint.strokeRect(xOf(box.x), yOf(box.y + box.d), box.w * scale, box.d * scale, "#111", 1.6);
+    }
     const midX = xOf(box.x + box.w / 2);
     const midY = yOf(box.y + box.d / 2);
-    paint.text(midX - 28, midY - 8, `${EDGE[ramp.edge]}측 램프`, 12, "#111");
-    paint.text(midX - 24, midY + 12, `${percent.toFixed(1)}%${over ? " 초과" : ""}`, 13, over ? "#9a3412" : "#111");
+    paint.text(midX - 28, midY - 8, `${EDGE[ramp.edge]}측 ${shape.kind === "curved" ? "곡선 " : ""}램프`, 12, "#111");
+    paint.text(midX - 24, midY + 12, shape.kind === "curved" ? `최대 ${percent.toFixed(1)}%${over ? " 불가" : ""}` : `${percent.toFixed(1)}%${over ? " 초과" : ""}`, 13, over ? "#9a3412" : "#111");
     const inward = ramp.edge === "s" || ramp.edge === "w" ? -1 : 1;
     const vertical = ramp.edge === "n" || ramp.edge === "s";
     paint.arrow(
@@ -93,7 +106,7 @@ export function renderSheet(paint, state, info, floorIndex) {
       "#111",
     );
   }
-  for (const opening of state.openings) {
+  for (const opening of visibleOpenings(state)) {
     const at = Number.isFinite(opening.t) ? opening.t : opening.at;
     if (!Number.isFinite(at)) continue;
     const label = opening.kind === "out" ? "출구" : opening.kind === "in" ? "입구" : (opening.label || "출입구");
@@ -109,7 +122,9 @@ export function renderSheet(paint, state, info, floorIndex) {
     y2: point.y,
   }));
   drives.forEach((segment) => {
-    paint.arrow(xOf(segment.x1), yOf(segment.y1), xOf(segment.x2), yOf(segment.y2), state.connected ? "#1d4e89" : "#9a3412");
+    const color = state.connected ? "#1d4e89" : "#9a3412";
+    if (segment.head === false) paint.line(xOf(segment.x1), yOf(segment.y1), xOf(segment.x2), yOf(segment.y2), color, 1.4);
+    else paint.arrow(xOf(segment.x1), yOf(segment.y1), xOf(segment.x2), yOf(segment.y2), color);
   });
   paint.text(xOf(plate.width / 2) - 28, yOf(plate.depth / 2), `차로 ${AISLE.toFixed(1)}m`, 13, "#1d4e89");
 
@@ -132,14 +147,17 @@ export function renderSheet(paint, state, info, floorIndex) {
   paint.text(margin.l + 90, height - 52, `축척 1:${Math.round(metersPerPx * 1000)}`, 12, "#111");
 
   const boxX = width - 330;
-  const boxY = height - 250;
-  paint.strokeRect(boxX, boxY, 290, 180, "#111", 1.2);
+  const boxY = height - 294;
+  paint.strokeRect(boxX, boxY, 290, 224, "#111", 1.2);
   const lines = [
     ["도면명", `지하 ${floorIndex + 1}층 주차장 평면도`],
     ["프로젝트", state.demand?.projectName || "주차장"],
     ["법정 대수", `${info.required}대`],
     ["배치 대수", `${info.placed}대`],
     ["지하층", `${info.floors}층`],
+    ["층고", plate.floorHeight ? `${plate.floorHeight}m (유효 ${clearHeightOf(plate.floorHeight)}m)` : "—"],
+    ["장애인", info.stallTypes ? `${info.stallTypes.disabled}칸 (번호 옆 '장')` : "—"],
+    ["확장형", info.stallTypes && info.stallTypes.extended ? `${info.stallTypes.extended}칸 2.6×5.2m (번호 옆 '확')` : "—"],
     ["축척", `1:${Math.round((1 / scale) * 1000)}`],
     ["날짜", info.checkedOn || ""],
   ];
@@ -173,6 +191,16 @@ function canvasPainter(ctx) {
       ctx.lineWidth = width;
       if (dashed) ctx.setLineDash([6, 4]);
       ctx.strokeRect(x, y, w, h);
+      ctx.restore();
+    },
+    poly(points, color, width) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.stroke();
       ctx.restore();
     },
     line(x1, y1, x2, y2, color, width) {
@@ -221,6 +249,9 @@ function svgPainter() {
     strokeRect(x, y, w, h, color, lineWidth, dashed) {
       parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${color}" stroke-width="${lineWidth}"${dashed ? ' stroke-dasharray="6 4"' : ""}/>`);
     },
+    poly(points, color, lineWidth) {
+      parts.push(`<polygon points="${points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="${lineWidth}"/>`);
+    },
     line(x1, y1, x2, y2, color, lineWidth) {
       parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${lineWidth}"/>`);
     },
@@ -267,4 +298,9 @@ export function printSheet(canvas) {
 <style>@page{size:A3 landscape;margin:8mm} body{margin:0} img{width:100%;height:auto}</style>
 <img src="${canvas.toDataURL("image/png")}" onload="print();">`);
   popup.document.close();
+}
+
+// 내부 램프와 묶인 출입구는 벽에 표시하지 않는다(차는 벽이 아니라 램프로 드나든다).
+function visibleOpenings(state) {
+  return state.openings.filter((opening) => !(opening.linkedRamp && state.ramps.some((ramp) => ramp.id === opening.linkedRamp && (ramp.placement || "internal") !== "external")));
 }

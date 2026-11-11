@@ -94,3 +94,23 @@ run("기준 평면에서 내부 램프 + 분리 출입", {
   entranceMode: "separate",
   circulation: "ccw",
 });
+
+// 확장형 30% (법정 50대 이상) — 실제 화면과 같은 조건(법정 112대, 장애인 3%)
+for (const clear of [0.05, 0]) {
+  const legalPlate = { ...refPlate, minClear: clear, legalStalls: 112, stallRules: { disabled: true, disabledRate: 0.03, legalStalls: 112 } };
+  const vs = generateVariants({
+    plate: legalPlate,
+    cores: referenceCase.cores,
+    ramps: [{ id: 1, ...referenceCase.ramp, placement: "external" }],
+    openings: [],
+    rampPlacement: "external",
+    entranceMode: "integrated",
+    circulation: "ccw",
+  });
+  console.log(`\n## 확장형 적용 · 기준 사례 · 이격 ${clear}m`);
+  table(vs);
+  vs.forEach((v) => {
+    const st = v.metrics.stallTypes || {};
+    console.log(`${v.id}: 일반 ${st.general} · 확장 ${st.extended} · 장애인 ${st.disabled} / 총 ${st.total} · ${v.issues.filter((i) => i.type === "stallType").map((i) => i.label).join(", ")}`);
+  });
+}

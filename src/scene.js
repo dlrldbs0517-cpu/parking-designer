@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, WALL_T, rampFootprint } from "./layout.js?v=84";
-import { state, subscribe, summary } from "./state.js?v=84";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=163";
+// 층고는 입력값(state.plate.floorHeight)을 쓴다
+const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
+import { state, subscribe, summary } from "./state.js?v=163";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -112,7 +114,7 @@ function rebuild(sun) {
 
   const levels = single ? [Math.max(0, Math.min(drawn - 1, state.floorView))] : [...Array(drawn).keys()];
   levels.forEach((level) => {
-    const base = single ? 0 : -level * FLOOR_H;
+    const base = single ? 0 : -level * floorH();
     const floor = new THREE.Group();
     building.add(floor);
     host = floor;
@@ -125,9 +127,10 @@ function rebuild(sun) {
     addClearance(base);
     state.cores.forEach((core) => addCore(core, coreMat, base));
     state.ramps.forEach((ramp) => addRamp(ramp, rampMat, base, hazard));
+    if (level === 0) state.ramps.forEach((ramp) => addGroundApproach(ramp, base, rampMat));
     addWalls(concrete, base);
     addGates(base);
-    state.openings.forEach((opening) => {
+    visibleOpenings().forEach((opening) => {
       addThreshold(opening, opening.kind === "in" ? inMat : outMat, base);
     });
     addLabel(`B${level + 1}`, plate.width / 2, base + 1.2, -2.2, 6.4);
@@ -136,18 +139,18 @@ function rebuild(sun) {
   host = building;
   if (!single) {
     addGrade(plate);
-    addLabel("지상", plate.width / 2, FLOOR_H + 1.2, -3);
+    addLabel("지상", plate.width / 2, floorH() + 1.2, -3);
   }
-  if (floors > drawn) addLabel(`외 ${floors - drawn}개 층`, plate.width + 8, -drawn * FLOOR_H / 2, plate.depth / 2);
+  if (floors > drawn) addLabel(`외 ${floors - drawn}개 층`, plate.width + 8, -drawn * floorH() / 2, plate.depth / 2);
 
   const stack = single ? 1 : drawn;
   const rampReach = state.ramps.reduce((reach, ramp) => {
     const box = rampFootprint(ramp, plate);
     return Math.max(reach, Math.max(0, -box.x), Math.max(0, -box.y), Math.max(0, box.x + box.w - plate.width), Math.max(0, box.y + box.d - plate.depth));
   }, 0);
-  const span = Math.max(plate.width + rampReach, plate.depth + rampReach, stack * FLOOR_H);
+  const span = Math.max(plate.width + rampReach, plate.depth + rampReach, stack * floorH());
   sun.position.set(-plate.width * 0.2, span, plate.depth * 0.2);
-  sun.target.position.set(plate.width / 2, single ? 1 : -drawn * FLOOR_H / 2, plate.depth / 2);
+  sun.target.position.set(plate.width / 2, single ? 1 : -drawn * floorH() / 2, plate.depth / 2);
   sun.shadow.camera.left = -span;
   sun.shadow.camera.right = span * 1.4;
   sun.shadow.camera.top = span;
@@ -157,7 +160,7 @@ function rebuild(sun) {
   sun.shadow.camera.updateProjectionMatrix();
 
   if (!keepCamera) {
-    const center = new THREE.Vector3(plate.width / 2, single ? 1.2 : -((drawn - 1) * FLOOR_H) / 2, plate.depth / 2);
+    const center = new THREE.Vector3(plate.width / 2, single ? 1.2 : -((drawn - 1) * floorH()) / 2, plate.depth / 2);
     camera.position.set(center.x + plate.width * 0.9, center.y + span * 0.42, center.z + plate.depth * 1.05);
     controls.target.copy(center);
     controls.update();
@@ -175,6 +178,12 @@ function addSlab(plate, base, material) {
   shape.lineTo(plate.width, plate.depth);
   shape.lineTo(0, plate.depth);
   shape.lineTo(0, 0);
+  curvedRampHoles(plate).forEach((poly) => {
+    const path = new THREE.Path();
+    poly.forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y)));
+    path.lineTo(poly[0].x, poly[0].y);
+    shape.holes.push(path);
+  });
   rampHoles(plate).forEach((hole) => {
     const path = new THREE.Path();
     path.moveTo(hole.x, hole.y);
@@ -192,9 +201,31 @@ function addSlab(plate, base, material) {
   host.add(slab);
 }
 
+// 곡선 램프 자리의 슬래브 구멍. 조각끼리 변이 맞닿지 않게 살짝 줄인다.
+function curvedRampHoles(plate) {
+  const polys = [];
+  state.ramps.forEach((ramp) => {
+    const shape = rampShape(ramp, plate);
+    if (shape.kind !== "curved") return;
+    shape.polygons.forEach((poly) => {
+      const cx = poly.reduce((sum, p) => sum + p.x, 0) / poly.length;
+      const cy = poly.reduce((sum, p) => sum + p.y, 0) / poly.length;
+      const inner = poly.map((p) => {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const len = Math.hypot(dx, dy) || 1;
+        return { x: p.x - (dx / len) * 0.05, y: p.y - (dy / len) * 0.05 };
+      });
+      if (inner.every((p) => p.x > 0.2 && p.y > 0.2 && p.x < plate.width - 0.2 && p.y < plate.depth - 0.2)) polys.push(inner);
+    });
+  });
+  return polys;
+}
+
 function rampHoles(plate) {
   const holes = [];
   state.ramps.forEach((ramp) => {
+    if (rampShape(ramp, plate).kind === "curved") return;
     const box = rampFootprint(ramp, plate);
     const x = Math.max(0.6, box.x);
     const y = Math.max(0.6, box.y);
@@ -246,7 +277,7 @@ function strip(group, geometry, material, x, y, z, sx, sz) {
 
 function addCore(core, material, base) {
   const t = WALL_T;
-  const h = FLOOR_H - 0.05;
+  const h = floorH() - 0.05;
   const door = 1.1;
   wallBox(core.x + core.w / 2, base, core.y + core.d - t / 2, core.w, t, material, h);
   wallBox(core.x + t / 2, base, core.y + core.d / 2, t, core.d, material, h);
@@ -271,9 +302,14 @@ function addCore(core, material, base) {
 }
 
 function addRamp(ramp, material, base, hazard) {
+  const shape = rampShape(ramp, state.plate);
+  if (shape.kind === "curved") {
+    addCurvedRamp(ramp, shape, material, base, hazard);
+    return;
+  }
   const footprint = rampFootprint(ramp, state.plate);
   const low = base + 0.12;
-  const high = base + FLOOR_H;
+  const high = base + floorH();
   let corners;
   if (ramp.edge === "s") {
     corners = [
@@ -341,7 +377,7 @@ function addThreshold(opening, material, base) {
 }
 
 function addGrade(plate) {
-  const y = FLOOR_H;
+  const y = floorH();
   const points = [
     new THREE.Vector3(0, y, 0),
     new THREE.Vector3(plate.width, y, 0),
@@ -403,9 +439,17 @@ function segments(length, cuts) {
   return spans;
 }
 
+let disabledMat = null;
+function stallMaterial(stall, fallback) {
+  // 장애인전용은 파란 바닥
+  if (stall.type !== "disabled") return fallback;
+  if (!disabledMat) disabledMat = standard("#3d6fb6", 0.8);
+  return disabledMat;
+}
+
 function addStallPads(base, material) {
   state.stalls.forEach((stall) => {
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(stall.w - 0.04, 0.02, stall.d - 0.04), material);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(stall.w - 0.04, 0.02, stall.d - 0.04), stallMaterial(stall, material));
     pad.position.set(stall.x + stall.w / 2, base + 0.03, stall.y + stall.d / 2);
     pad.receiveShadow = true;
     host.add(pad);
@@ -430,8 +474,8 @@ function addClearance(base) {
 }
 
 function addColumn(column, index, base, concrete, hazard) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(column.w, FLOOR_H - 1, column.d), concrete);
-  mesh.position.set(column.x + column.w / 2, base + 1 + (FLOOR_H - 1) / 2, column.y + column.d / 2);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(column.w, floorH() - 1, column.d), concrete);
+  mesh.position.set(column.x + column.w / 2, base + 1 + (floorH() - 1) / 2, column.y + column.d / 2);
   mesh.castShadow = true;
   host.add(mesh);
   const band = new THREE.Mesh(new THREE.BoxGeometry(column.w + 0.02, 1, column.d + 0.02), hazard);
@@ -445,6 +489,7 @@ function addArrows(base) {
   const drives = state.drives || [];
   const material = standard("#f7f4ee", 0.35);
   drives.forEach((segment) => {
+    if (segment.onRamp) return; // 경사면 위라 3D에서는 생략(램프 자체가 방향을 보여 줌)
     const dx = segment.x2 - segment.x1;
     const dy = segment.y2 - segment.y1;
     const length = Math.hypot(dx, dy);
@@ -462,9 +507,10 @@ function addArrows(base) {
 
 function addGates(base) {
   const used = new Set();
-  state.openings.forEach((opening, index) => {
+  const shown = visibleOpenings();
+  shown.forEach((opening, index) => {
     if (used.has(index)) return;
-    const twin = state.openings.findIndex((other, otherIndex) => otherIndex !== index && other.edge === opening.edge && Math.abs(other.t - opening.t) < 1.2);
+    const twin = shown.findIndex((other, otherIndex) => otherIndex !== index && other.edge === opening.edge && Math.abs(other.t - opening.t) < 1.2);
     if (twin >= 0) used.add(twin);
     const label = twin >= 0 ? "입구·출구" : opening.kind === "in" ? "입구" : "출구";
     const spot = gatePoint(opening);
@@ -491,11 +537,83 @@ function gatePoint(opening) {
   return { x: plate.width - 1.2, z: opening.t, boothX: plate.width - 1.6, boothZ: opening.t - opening.width / 2 + 0.8 };
 }
 
+/** 내부형 램프: 지상에서 도로 → 경사 시작(외벽에서 11m)까지 평지 진입로. 맨 위층에만 그린다. */
+function addGroundApproach(ramp, base, material) {
+  if ((ramp.placement || "internal") !== "internal") return;
+  const plate = state.plate;
+  const k = RAMP_INSET;
+  const y = base + floorH() + 0.02;
+  const w = ramp.width;
+  let box;
+  if (ramp.edge === "w") box = { x: 0, z: ramp.t - w / 2, sx: k, sz: w };
+  else if (ramp.edge === "e") box = { x: plate.width - k, z: ramp.t - w / 2, sx: k, sz: w };
+  else if (ramp.edge === "s") box = { x: ramp.t - w / 2, z: 0, sx: w, sz: k };
+  else box = { x: ramp.t - w / 2, z: plate.depth - k, sx: w, sz: k };
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(box.sx, 0.06, box.sz), material);
+  mesh.position.set(box.x + box.sx / 2, y, box.z + box.sz / 2);
+  mesh.receiveShadow = true;
+  host.add(mesh);
+}
+
+/** 곡선 램프: 중심선을 따라 폭만큼 펼친 경사면 + 양쪽 벽. 높이는 구간별 경사로 계산한 값(h)을 쓴다. */
+function addCurvedRamp(ramp, shape, material, base, hazard) {
+  const high = base + floorH();
+  const low = base + 0.12;
+  const half = ramp.width / 2;
+  const path = shape.path;
+  const heightAt = (p) => high - (high - low) * Math.min(1, (p.h || 0) / floorH());
+  const sides = path.map((p, i) => {
+    const a = path[Math.max(0, i - 1)];
+    const b = path[Math.min(path.length - 1, i + 1)];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const y = heightAt(p);
+    return { l: [p.x + nx * half, y, p.y + ny * half], r: [p.x - nx * half, y, p.y - ny * half] };
+  });
+  const surface = [];
+  const wallL = [];
+  const wallR = [];
+  for (let i = 0; i < sides.length - 1; i += 1) {
+    const s0 = sides[i];
+    const s1 = sides[i + 1];
+    surface.push(...s0.l, ...s0.r, ...s1.r, ...s0.l, ...s1.r, ...s1.l);
+    const up = (v) => [v[0], v[1] + 0.9, v[2]];
+    wallL.push(...s0.l, ...s1.l, ...up(s1.l), ...s0.l, ...up(s1.l), ...up(s0.l));
+    wallR.push(...s0.r, ...s1.r, ...up(s1.r), ...s0.r, ...up(s1.r), ...up(s0.r));
+  }
+  const mesh = (positions, mat) => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
+    geometry.computeVertexNormals();
+    const item = new THREE.Mesh(geometry, mat);
+    item.castShadow = true;
+    item.receiveShadow = true;
+    host.add(item);
+  };
+  const wall = standard("#c8c2b8", 0.75);
+  wall.side = THREE.DoubleSide;
+  const surfaceMat = material.clone();
+  surfaceMat.side = THREE.DoubleSide;
+  mesh(surface, surfaceMat);
+  mesh(wallL, wall);
+  mesh(wallR, wall);
+  if (state.openings.some((opening) => opening.edge === ramp.edge && Math.abs(opening.t - ramp.t) < 1)) return;
+  const footprint = shape.pieces[0];
+  const alongX = ramp.edge === "n" || ramp.edge === "s";
+  const outer = gatePoint({ ...ramp });
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(alongX ? footprint.w : 0.12, 0.16, alongX ? 0.12 : footprint.d), hazard);
+  bar.position.set(outer.x, base + CLEAR_HEIGHT, outer.z);
+  host.add(bar);
+}
+
 function addRampEdges(ramp, footprint, base, hazard) {
   const curb = standard("#d8d4cc", 0.7);
   const wall = standard("#c8c2b8", 0.75);
   const low = base + 0.12;
-  const high = base + FLOOR_H;
+  const high = base + floorH();
   const outerHigh = ramp.edge === "s" || ramp.edge === "w";
   const samples = 10;
   const alongX = ramp.edge === "n" || ramp.edge === "s";
@@ -600,4 +718,9 @@ function clearGroup(group) {
   geometries.forEach((item) => item.dispose());
   materials.forEach((item) => item.dispose());
   group.clear();
+}
+
+// 내부 램프와 묶인 출입구는 벽에 표시하지 않는다(차는 벽이 아니라 램프로 드나든다).
+function visibleOpenings() {
+  return state.openings.filter((opening) => !(opening.linkedRamp && state.ramps.some((ramp) => ramp.id === opening.linkedRamp && (ramp.placement || "internal") !== "external")));
 }

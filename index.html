@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=84" />
+    <link rel="stylesheet" href="styles.css?v=163" />
     <script type="importmap">
       {
         "imports": {
-          "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
-          "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+          "three": "./vendor/three/build/three.module.js",
+          "three/addons/": "./vendor/three/examples/jsm/"
         }
       }
     </script>
@@ -44,21 +44,34 @@
             <select id="region"></select>
           </label>
         </div>
-        <label>
-          조례 할증·완화 비율
-          <input id="ordinance" type="number" min="0.05" step="0.05" value="1" />
-        </label>
         <div id="use-form"></div>
-        <div class="split">
-          <label>
-            1대당 면적 (㎡)
-            <input id="area-per-stall" type="number" min="15" step="1" value="33" />
-          </label>
-          <label>
-            계획 지하층 수
-            <input id="planned-floors" type="number" min="1" step="1" value="2" />
-          </label>
+        <div class="split column-row">
+          <p id="demand-summary" class="hint"></p>
+          <button type="button" id="open-demand-dialog" class="ghost tiny">산정 고급 설정</button>
         </div>
+        <dialog id="demand-dialog" class="settings-dialog">
+          <h3>주차대수 산정 고급 설정</h3>
+          <label>
+            주차장 조례 강화·완화 배율 (0.5~1.5, 기본 1)
+            <input id="ordinance" type="number" min="0.5" max="1.5" step="0.05" value="1" />
+          </label>
+          <p class="hint">주차장법 시행령 제6조②: 지자체 조례로 설치기준을 ½ 범위에서 강화·완화. 사업계획승인 대상 공동주택(주택건설기준 제27조)에는 적용되지 않을 수 있으니 보통 1로 둡니다.</p>
+          <div class="split">
+            <label>
+              1대당 면적 (㎡, 크기 추천용)
+              <input id="area-per-stall" type="number" min="15" step="1" value="33" />
+            </label>
+            <label>
+              계획 지하층 수 (크기 추천용)
+              <input id="planned-floors" type="number" min="1" step="1" value="2" />
+            </label>
+          </div>
+          <p class="hint">"크기 추천"에만 쓰는 어림값. 1대당 면적은 주차칸+차로·기둥·램프 몫(보통 30~40㎡).</p>
+          <div class="dialog-actions"><button type="button" id="close-demand-dialog">확인</button></div>
+        </dialog>
+        <p class="hint">주차장 크기를 모르면 아래 버튼으로 추천값을 채운 뒤 고쳐 쓰세요.</p>
+        <button type="button" id="suggest-size" class="ghost tiny">법정 대수로 크기 추천</button>
+        <p class="hint" id="suggest-note"></p>
         <div class="split">
           <label>
             주차장 가로 (m)
@@ -69,27 +82,84 @@
             <input id="park-depth" type="number" min="18" step="0.1" value="42" />
           </label>
         </div>
-        <div class="split">
+        <div class="split column-row">
           <label>
             기둥 간격 (m)
             <input id="column-spacing" type="number" min="5" max="12" step="0.1" value="8.1" />
           </label>
+          <button type="button" id="open-column-dialog" class="ghost tiny">기둥 고급 설정</button>
+        </div>
+        <p id="column-summary" class="hint"></p>
+        <p id="bay-readout" class="hint">구간당 3대, 이격 0.05m</p>
+        <dialog id="column-dialog" class="settings-dialog">
+          <h3>기둥 고급 설정</h3>
+          <div class="split">
+            <label>
+              기둥 단면 (m)
+              <input id="column-size" type="number" min="0.3" max="1.5" step="0.05" value="0.5" />
+            </label>
+            <label>
+              최소 이격 (m)
+              <input id="min-clear" type="number" min="0" max="0.5" step="0.01" value="0" />
+            </label>
+          </div>
+          <p class="hint">기둥 단면은 정사각 한 변. 최소 이격은 주차칸과 기둥 사이 여유.</p>
+          <div class="split">
+            <label>
+              기둥 간격 가로 (선택)
+              <input id="spans-x" type="text" placeholder="예: 8.1, 8.4, 9" />
+            </label>
+            <label>
+              기둥 간격 세로 (선택)
+              <input id="spans-y" type="text" placeholder="비우면 기본 간격" />
+            </label>
+          </div>
+          <p class="hint">비우면 위의 기둥 간격을 씁니다. 왼쪽·아래에서부터 순서대로 띄우고, 다 쓰면 마지막 값을 반복합니다.</p>
+          <div class="dialog-actions"><button type="button" id="close-column-dialog">확인</button></div>
+        </dialog>
+        <label class="check" hidden><input id="trim-dead" type="checkbox" checked /> 막다른 차로 정리 · 진입 불가 칸 제외</label><!-- 항상 켜짐 -->
+        <input id="stall-types" type="checkbox" checked hidden /><!-- 장애인전용 구획은 항상 반영 -->
+        <div class="split column-row">
+          <p id="type-readout" class="hint"></p>
+          <button type="button" id="open-disabled-dialog" class="ghost tiny">장애인 구획 설정</button>
+        </div>
+        <dialog id="disabled-dialog" class="settings-dialog">
+          <h3>장애인전용 주차구획</h3>
           <label>
-            기둥 단면 (m)
-            <input id="column-size" type="number" min="0.3" max="1.5" step="0.05" value="0.5" />
+            장애인전용 비율
+            <select id="disabled-rate">
+              <option value="0.02">2%</option>
+              <option value="0.03" selected>3%</option>
+              <option value="0.04">4%</option>
+            </select>
           </label>
+          <p class="hint">장애인등편의법 시행령 별표2: 주차대수의 2~4% 범위에서 지자체 조례로 정합니다(서울 3%). 구획 크기 3.3×5.0m, 코어 가까이 배치.</p>
+          <div class="dialog-actions"><button type="button" id="close-disabled-dialog">확인</button></div>
+        </dialog>
+        <div class="split">
+          <label>
+            층고 (m)
+            <input id="floor-height" type="number" min="2.6" max="6" step="0.05" value="3.2" />
+          </label>
+          <p id="clear-readout" class="hint">차로 유효높이 2.3m 이상</p>
         </div>
         <div class="split">
           <label>
-            최소 이격 (m)
-            <input id="min-clear" type="number" min="0" max="0.5" step="0.01" value="0.05" />
+            도로 접한 변
+            <select id="road-edge">
+              <option value="s">남측 (아래)</option>
+              <option value="n">북측 (위)</option>
+              <option value="w">서측 (왼쪽)</option>
+              <option value="e">동측 (오른쪽)</option>
+            </select>
           </label>
           <label>
-            대지 여유 (m)
-            <input id="site-margin" type="number" min="0" max="40" step="0.1" value="20" />
+            램프 위치
+            <select id="ramp-pos"></select>
           </label>
         </div>
-        <p id="bay-readout" class="hint">구간당 3대, 이격 0.05m</p>
+        <p id="ramp-pos-note" class="hint warn"></p>
+        <p class="hint">램프는 도로에서 바로 진입하므로 도로에 접한 변에 둡니다. 램프 위치 `자동`은 그 변의 양 끝·가운데를 모두 돌려 보고 대수가 가장 많은 곳을 고릅니다. 도로변 3m 구간은 경사 8.5% 이하로 자동 반영됩니다.</p>
         <div class="split">
           <label>
             램프 배치
@@ -106,34 +176,51 @@
             </select>
           </label>
         </div>
-        <label>
-          순환
-          <select id="circulation">
-            <option value="ccw">일방향 반시계</option>
-            <option value="cw">일방향 시계</option>
-            <option value="both">양방향</option>
-          </select>
-        </label>
+        <div id="site-margin-row">
+          <label>
+            대지 여유 (외부 램프용, m)
+            <input id="site-margin" type="number" min="0" max="40" step="0.1" value="20" />
+          </label>
+          <p class="hint">주차장 외곽(지하 외벽)에서 대지 경계선까지 거리. 외부 램프가 이 안에 들어가야 합니다.</p>
+          <div class="split column-row">
+            <p id="margin-summary" class="hint"></p>
+            <button type="button" id="open-margin-dialog" class="ghost tiny">방향별 설정</button>
+          </div>
+          <dialog id="margin-dialog" class="settings-dialog">
+            <h3>방향별 대지 여유 (m)</h3>
+            <div class="split">
+              <label>북 <input id="margin-n" type="number" min="0" max="80" step="0.1" placeholder="공통 값" /></label>
+              <label>남 <input id="margin-s" type="number" min="0" max="80" step="0.1" placeholder="공통 값" /></label>
+            </div>
+            <div class="split">
+              <label>서 <input id="margin-w" type="number" min="0" max="80" step="0.1" placeholder="공통 값" /></label>
+              <label>동 <input id="margin-e" type="number" min="0" max="80" step="0.1" placeholder="공통 값" /></label>
+            </div>
+            <p class="hint">비운 방향은 위의 공통 대지 여유를 씁니다. 평면·도면에 대지 경계(회색 선)로 표시됩니다.</p>
+            <div class="dialog-actions"><button type="button" id="close-margin-dialog">확인</button></div>
+          </dialog>
+        </div>
+        <select id="circulation" hidden><option value="ccw" selected>반시계</option></select><!-- 순환 방향은 자동 -->
         <p class="hint">기둥 간격은 중심 간격입니다. 8.1m, 기둥 0.5m이면 순간격 7.6m에 2.5m 칸이 3대, 이격 0.05m입니다. 대지 여유는 건축선 밖에 외부 램프를 둘 수 있는 폭입니다.</p>
-        <button id="load-reference" type="button">기준 사례 불러오기</button>
         <table id="demand-table" class="demand"></table>
         <p id="demand-note" class="hint"></p>
         <p class="hint">개략 검토용이며, 실제 인허가는 해당 지자체 조례와 최신 법령을 확인해야 합니다.</p>
         <dl class="preview" id="plate-preview"></dl>
         <p id="input-error" class="error" hidden></p>
         <button id="generate" type="button" class="primary">평면 만들기</button>
+        <div class="split column-row example-row">
+          <p class="hint">시연용 예시: 대학 건물 지하 1층 도면(크기·코어·램프를 덮어씀)</p>
+          <button id="load-reference" type="button" class="ghost tiny">예시 불러오기</button>
+        </div>
       </section>
 
       <section class="pane" data-pane="2" hidden>
         <h2>평면에서 확정</h2>
-        <p class="hint">배치안을 고르면 그 평면으로 3단계에 갑니다. 코어·램프는 끌어 옮길 수 있습니다. 램프 일체형 출입구는 램프와 함께 움직입니다.</p>
+        <p class="hint">배치안을 고르면 그 평면으로 3단계에 갑니다. 코어·램프·출입구는 바로 끌어 옮기고, 빈 곳을 끌면 화면이 움직입니다(휠로 확대). 램프 일체형 출입구는 램프와 함께 움직입니다.</p>
         <div id="reference-notes" class="hint"></div>
         <div class="tools" id="tools">
-          <button type="button" data-tool="core" class="on">코어</button>
-          <button type="button" data-tool="entrance">입구</button>
-          <button type="button" data-tool="exit">출구</button>
-          <button type="button" data-tool="ramp">램프</button>
-          <button type="button" data-tool="pan">화면 이동</button>
+          <button type="button" data-tool="entrance">입구 추가</button>
+          <button type="button" data-tool="exit">출구 추가</button>
         </div>
 
         <fieldset>
@@ -145,31 +232,54 @@
             </label>
             <button id="add-core" type="button" class="ghost">코어 추가</button>
           </div>
-          <label>
-            면적 (㎡)
-            <input id="core-area" type="number" min="12" step="1" />
-          </label>
           <div class="split">
             <label>
-              가로 (m)
-              <input id="core-w" type="number" min="3" step="0.1" />
+              가로 (기둥 칸)
+              <select id="core-nx"><option value="1">1칸</option><option value="2">2칸</option><option value="3">3칸</option><option value="4">4칸</option></select>
             </label>
             <label>
-              세로 (m)
-              <input id="core-d" type="number" min="3" step="0.1" />
+              세로 (기둥 칸)
+              <select id="core-ny"><option value="1">1칸</option><option value="2">2칸</option><option value="3">3칸</option><option value="4">4칸</option></select>
             </label>
           </div>
-          <div class="split">
-            <label>
-              X (m)
-              <input id="core-x" type="number" step="0.1" />
-            </label>
-            <label>
-              Y (m)
-              <input id="core-y" type="number" step="0.1" />
-            </label>
+          <div class="split column-row">
+            <p id="core-size-note" class="hint"></p>
+            <button type="button" id="open-core-dialog" class="ghost tiny">고급 설정</button>
           </div>
-          <p class="hint">코어는 외곽 차로 6m 안쪽에 둡니다. X·Y는 남서쪽 모서리 기준입니다.</p>
+          <div class="split column-row">
+            <p id="core-search-note" class="hint"></p>
+            <button type="button" id="auto-core" class="ghost tiny">코어 자리 자동 찾기</button>
+          </div>
+          <p class="hint">코어는 기둥 격자에 맞춰 놓입니다(끌면 기둥 면에 붙음). 평면 만들기 때 격자 칸을 모두 돌려 보고 대수가 가장 많은 자리에 둡니다(직접 옮기면 그 자리를 유지). 추천은 기둥 간격 기준 계단+승강기 2대 코어(약 50㎡ 이상)가 들어가는 가장 작은 칸 수입니다.</p>
+          <dialog id="core-dialog" class="settings-dialog">
+            <h3>코어 직접 설정</h3>
+            <label>
+              면적 (㎡)
+              <input id="core-area" type="number" min="12" step="1" />
+            </label>
+            <div class="split">
+              <label>
+                가로 (m)
+                <input id="core-w" type="number" min="3" step="0.1" />
+              </label>
+              <label>
+                세로 (m)
+                <input id="core-d" type="number" min="3" step="0.1" />
+              </label>
+            </div>
+            <div class="split">
+              <label>
+                X (m)
+                <input id="core-x" type="number" step="0.1" />
+              </label>
+              <label>
+                Y (m)
+                <input id="core-y" type="number" step="0.1" />
+              </label>
+            </div>
+            <p class="hint">면적·가로·세로를 직접 넣으면 기둥 격자 맞춤이 꺼집니다. 칸 수를 다시 고르면 켜집니다. X·Y는 남서쪽 모서리 기준입니다.</p>
+            <div class="dialog-actions"><button type="button" id="close-core-dialog">확인</button></div>
+          </dialog>
         </fieldset>
 
         <fieldset>
@@ -206,21 +316,33 @@
 
         <fieldset>
           <legend>입구 · 출구 · 램프</legend>
-          <label>
-            선택 개구부 폭 (m)
-            <input id="entrance-width" type="number" min="3" max="12" step="0.1" value="6" />
-          </label>
-          <div class="split">
-            <label>
-              램프 폭 (m)
-              <input id="ramp-width" type="number" min="3.5" max="12" step="0.1" value="6" />
-            </label>
-            <label>
-              램프 길이 (m)
-              <input id="ramp-length" type="number" min="6" step="0.1" value="18" />
-            </label>
+          <div class="split column-row">
+            <p id="ramp-summary" class="hint"></p>
+            <button type="button" id="open-ramp-dialog" class="ghost tiny">고급 설정</button>
           </div>
-          <div class="split">
+          <dialog id="ramp-dialog" class="settings-dialog">
+            <h3>램프 · 개구부 직접 설정</h3>
+            <div class="split">
+              <label>
+                램프 폭 (m)
+                <input id="ramp-width" type="number" min="3.5" max="12" step="0.1" value="6" />
+              </label>
+              <label>
+                램프 길이 (m)
+                <input id="ramp-length" type="number" min="6" step="0.1" value="18" />
+              </label>
+            </div>
+            <label>
+              선택 개구부 폭 (m)
+              <input id="entrance-width" type="number" min="3" max="12" step="0.1" value="6" />
+            </label>
+            <p class="hint">램프 길이는 층고로 자동 계산한 최소 길이입니다(도로변 3m·완화구간 포함). 더 짧으면 경사 초과로 탈락하고, 더 길면 경사는 완만해지지만 주차 대수가 줄 수 있습니다. 폭은 양방향 직선 6m · 곡선 6.5m가 법정 최소입니다.</p>
+            <div class="dialog-actions">
+              <button type="button" id="ramp-auto" class="ghost">자동값으로</button>
+              <button type="button" id="close-ramp-dialog">확인</button>
+            </div>
+          </dialog>
+          <div class="split" id="door-mode-row">
             <button id="place-split" type="button" class="ghost">분리 출입구</button>
             <button id="place-overlap" type="button" class="ghost">램프 일체형</button>
           </div>
@@ -252,8 +374,9 @@
       </section>
 
       <p class="note">
-        주차칸 2.5×5.0m, 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
+        주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
+        <br /><span class="hint">버전 2026-11-10 · r163</span>
       </p>
     </aside>
 
@@ -286,6 +409,6 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=84"></script>
+    <script type="module" src="src/main.js?v=163"></script>
   </body>
 </html>

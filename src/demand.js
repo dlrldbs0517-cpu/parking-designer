@@ -5,7 +5,8 @@ import {
   housingMinimumPerUnit,
   uses,
   zoneFactors,
-} from "./parkingRules.js?v=82";
+  zoneUseStatus,
+} from "./parkingRules.js?v=163";
 
 export function emptyDemand() {
   return {
@@ -77,19 +78,20 @@ function detachedRaw(area) {
 }
 
 /** 별표 1 비고 6. 합이 1 미만이면 0, 아니면 0.5 이상은 올린다. */
+// 주차장법 시행령 별표1 비고6: 총 1대 미만이면 0, 소수점 이하 0.5 이상이면 1대로 본다.
+// (수정 2026-11-10) 전에는 소수 첫째 자리로 먼저 반올림해서 0.96→1대, 1.46→2대로 잘못 나왔다.
 export function roundFacility(raw) {
-  const tenths = round1(raw);
-  if (tenths < 1) return 0;
-  const whole = Math.floor(tenths + 1e-9);
-  const fraction = tenths - whole;
-  return fraction >= 0.5 - 1e-9 ? whole + 1 : whole;
+  if (!(raw >= 1 - 1e-9)) return 0;
+  const whole = Math.floor(raw + 1e-9);
+  return raw - whole >= 0.5 - 1e-9 ? whole + 1 : whole;
 }
 
 export function calculateDemand(demand, plate, spacing = 8) {
   const source = demand || emptyDemand();
   const zone = zoneFactors[source.zone] || zoneFactors.general2;
   const typed = Number(source.ordinance);
-  const ordinance = Number.isFinite(typed) && typed > 0 ? typed : 0.05;
+  // 주차장법 시행령 제6조②: ½ 범위 → 0.5~1.5
+  const ordinance = Number.isFinite(typed) ? Math.min(1.5, Math.max(0.5, typed)) : 1;
   const factor = ordinance * zone.factor;
   const rows = [];
   let households = 0;
@@ -98,6 +100,8 @@ export function calculateDemand(demand, plate, spacing = 8) {
 
   for (const use of uses) {
     if (!source.active?.[use.id]) continue;
+    // 이 용도지역에 지을 수 없는 용도는 계산에서 뺀다(화면에서도 숨김).
+    if (zoneUseStatus(source.zone, use.id, source.region).s === "no") continue;
     if (use.kind === "housing") {
       const result = housingRaw(source.bands?.[use.id] || [], source.region);
       const scaled = result.raw * factor;
@@ -170,5 +174,5 @@ export function recommendPlate(floorArea, spacing) {
   const short = floorArea / long;
   const baysLong = Math.max(3, Math.ceil(long / step));
   const baysShort = Math.max(3, Math.ceil(short / step));
-  return { width: baysLong * step, depth: baysShort * step };
+  return { width: Math.round(baysLong * step * 10) / 10, depth: Math.round(baysShort * step * 10) / 10 };
 }

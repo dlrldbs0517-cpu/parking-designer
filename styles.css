@@ -354,3 +354,33 @@ main { position: relative; min-width: 0; min-height: 100%; }
   }
   main { height: 100%; min-height: 0; }
 }
+
+/* 잘못 입력한 칸 표시 (추가 2026-11-10) */
+input.bad { border-color: #b42318; background: #fdecea; }
+.check { justify-content: flex-start; text-align: left; }
+.check input { width: auto; flex: none; }
+
+.zone-tag { font-size: 11px; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+.zone-tag.ord { background: #fbeed3; color: #7a4b00; }
+.zone-note { font-size: 11px; color: #8a7f72; margin-left: 4px; }
+
+.use-card { border: 1px solid #e3dccf; border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: #fbf9f5; }
+.use-head { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.use-head .use-del { margin-left: auto; min-width: 28px; padding: 2px 8px; }
+.zone-tag.seoul { background: #e3eef9; color: #1d4e89; }
+
+details.advanced { margin: 8px 0; }
+details.advanced summary { cursor: pointer; color: #6b6156; font-size: 13px; }
+
+.column-row { align-items: end; }
+.column-row button { align-self: end; margin-bottom: 2px; }
+.settings-dialog { border: 1px solid #e3dccf; border-radius: 14px; padding: 18px 20px; max-width: 420px; width: 92vw; background: #fbf9f5; }
+.settings-dialog::backdrop { background: rgba(30, 24, 18, 0.35); }
+.settings-dialog h3 { margin: 0 0 10px; font-size: 16px; }
+.dialog-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+#demand-summary { margin: 0; align-self: center; }
+.example-row { margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(0,0,0,0.15); }
+.compare-card .tag.max { color: #2f7d4f; }
+.compare-card .tag.uniform { color: #3d6fb6; }
+.hint.warn { color: #b4401c; }
+.hint.warn:empty { display: none; }
