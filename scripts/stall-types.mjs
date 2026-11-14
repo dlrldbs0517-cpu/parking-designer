@@ -28,7 +28,7 @@ console.log(`- 17% 단일: ${plain}m (손계산 3.2/0.17=18.82 → 18.9) ${ok(pl
 console.log(`- 도로변 3m 8.5% 반영: ${gentle}m (손계산 3+(3.2-0.255)/0.17=20.32 → 20.4) ${ok(gentle === 20.4)}`);
 console.log(`- 20.4m 램프 본 경사 ${(rampMainSlope(20.4) * 100).toFixed(2)}% (17% 이하여야 함) ${ok(rampMainSlope(20.4) <= 0.17)}`);
 
-console.log("\n## 4. 장애인전용 구획 (기준 사례 72.9×56.7m, 법정 112대)");
+console.log("\n## 4. 장애인전용 구획 (기준 사례 73.9×57.7m, 법정 112대)");
 console.log("| 비율 | 일반형만 | 반영 후 | 장애인 칸 | 목표 | 충돌 | 겹침 | 판정 |");
 console.log("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |");
 const plate = (rules) => ({
@@ -82,14 +82,14 @@ for (const [name, w, d, edge, t, expect, legal] of rampCases) {
   console.log(`| ${name} | ${edge}측 | ${kind} | ${sh.total}m | ${segs} | ${drop.toFixed(2)}m | ${r.metrics.connected ? "연결" : "끊김"} · ${r.stalls.length}대 | ${pass ? "통과" : "확인 필요"} |`);
 }
 
-console.log("\n## 6. 기둥 간격 가로·세로 따로 입력");
+console.log("\n## 6. 기둥 간격 가로·세로 따로 입력 (외곽 기둥을 평면 안에 넣어 격자가 0.5m 안에서 시작)");
 console.log("| 입력 | 기둥 줄 (가로) | 예상 | 판정 |\n| --- | --- | --- | --- |");
 const gridCase = (spansX) => layoutParking({
   plate: { width: 48, depth: 42, spacing: 8.1, columnWidth: 0.5, columnDepth: 0.5, minClear: 0.05, siteMargin: 20, spansX },
   ramps: [{ id: 1, edge: "w", t: 8, width: 6, length: minStraightRampLength(), placement: "internal" }], openings: [], cores: [],
   rampPlacement: "internal", entranceMode: "integrated", circulation: "ccw", lockRamp: true,
 }).gridX.join(", ");
-for (const [label, spans, expect] of [["비움 (8.1m 하나)", null, "0, 8.1, 16.2, 24.3, 32.4, 40.5, 48"], ["4, 5, 6", [4, 5, 6], "0, 4, 9, 15, 21, 27, 33, 39, 45, 48"], ["8.4", [8.4], "0, 8.4, 16.8, 25.2, 33.6, 42, 48"]]) {
+for (const [label, spans, expect] of [["비움 (8.1m 하나)", null, "0.5, 8.6, 16.7, 24.8, 32.9, 41, 47.5"], ["4, 5, 6", [4, 5, 6], "0.5, 4.5, 9.5, 15.5, 21.5, 27.5, 33.5, 39.5, 47.5"], ["8.4", [8.4], "0.5, 8.9, 17.3, 25.7, 34.1, 42.5, 47.5"]]) {
   const got = gridCase(spans);
   console.log(`| ${label} | ${got} | ${expect} | ${ok(got === expect)} |`);
 }

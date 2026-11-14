@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="ko">
   <head>
+    <link rel="icon" href="data:," />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=163" />
+    <link rel="stylesheet" href="styles.css?v=221" />
     <script type="importmap">
       {
         "imports": {
@@ -69,12 +70,11 @@
           <p class="hint">"크기 추천"에만 쓰는 어림값. 1대당 면적은 주차칸+차로·기둥·램프 몫(보통 30~40㎡).</p>
           <div class="dialog-actions"><button type="button" id="close-demand-dialog">확인</button></div>
         </dialog>
-        <p class="hint">주차장 크기를 모르면 아래 버튼으로 추천값을 채운 뒤 고쳐 쓰세요.</p>
         <button type="button" id="suggest-size" class="ghost tiny">법정 대수로 크기 추천</button>
         <p class="hint" id="suggest-note"></p>
         <div class="split">
           <label>
-            주차장 가로 (m)
+            주차장 가로 (m) <span class="info" tabindex="0" title="주차장(지하 외벽 안쪽) 크기. 모르면 위 '법정 대수로 크기 추천'으로 채운 뒤 고쳐 쓰세요.">ⓘ</span>
             <input id="park-width" type="number" min="18" step="0.1" value="48" />
           </label>
           <label>
@@ -84,13 +84,12 @@
         </div>
         <div class="split column-row">
           <label>
-            기둥 간격 (m)
+            기둥 간격 (m) <span class="info" tabindex="0" title="기둥 중심 간격. 8.1m·기둥 0.5m면 기둥 사이 7.6m에 2.5m 칸 3대(확장형 2.6m 1대 포함 가능).">ⓘ</span>
             <input id="column-spacing" type="number" min="5" max="12" step="0.1" value="8.1" />
           </label>
           <button type="button" id="open-column-dialog" class="ghost tiny">기둥 고급 설정</button>
         </div>
         <p id="column-summary" class="hint"></p>
-        <p id="bay-readout" class="hint">구간당 3대, 이격 0.05m</p>
         <dialog id="column-dialog" class="settings-dialog">
           <h3>기둥 고급 설정</h3>
           <div class="split">
@@ -103,7 +102,14 @@
               <input id="min-clear" type="number" min="0" max="0.5" step="0.01" value="0" />
             </label>
           </div>
-          <p class="hint">기둥 단면은 정사각 한 변. 최소 이격은 주차칸과 기둥 사이 여유.</p>
+          <label>
+            외곽 기둥 위치
+            <select id="wall-columns">
+              <option value="back" selected>외벽에 붙임 (대수 우선)</option>
+              <option value="front">안쪽으로 당김 (외벽은 벽이 받음)</option>
+            </select>
+          </label>
+          <p class="hint">기둥 단면은 정사각 한 변. 최소 이격은 주차칸과 기둥 사이 여유. 외곽 기둥을 안쪽으로 당기면 벽 쪽 줄의 [확 일 확]이 안 들어가 대수가 줄 수 있습니다(기준 사례 141→131대).</p>
           <div class="split">
             <label>
               기둥 간격 가로 (선택)
@@ -121,7 +127,7 @@
         <input id="stall-types" type="checkbox" checked hidden /><!-- 장애인전용 구획은 항상 반영 -->
         <div class="split column-row">
           <p id="type-readout" class="hint"></p>
-          <button type="button" id="open-disabled-dialog" class="ghost tiny">장애인 구획 설정</button>
+          <button type="button" id="open-disabled-dialog" class="ghost tiny">구획 비율 설정</button>
         </div>
         <dialog id="disabled-dialog" class="settings-dialog">
           <h3>장애인전용 주차구획</h3>
@@ -134,6 +140,25 @@
             </select>
           </label>
           <p class="hint">장애인등편의법 시행령 별표2: 주차대수의 2~4% 범위에서 지자체 조례로 정합니다(서울 3%). 구획 크기 3.3×5.0m, 코어 가까이 배치.</p>
+          <h3>친환경차 전용주차구역</h3>
+          <div class="split">
+            <label>
+              적용
+              <select id="eco-mode">
+                <option value="auto" selected>자동(대상일 때만)</option>
+                <option value="on">항상</option>
+                <option value="off">끔</option>
+              </select>
+            </label>
+            <label>
+              비율 (%)
+              <input id="eco-rate" type="number" min="1" max="20" step="1" value="5" />
+            </label>
+          </div>
+          <p id="eco-note" class="hint">친환경자동차법 시행령 제18조의5·6: 총주차대수 50대 이상인 100세대 이상 아파트·공중이용시설은 신축 5% 이상(시·도 조례). 램프 도착 쪽에 모아 배치.</p>
+          <h3>평행주차</h3>
+          <label class="check"><input id="parallel-fill" type="checkbox" checked /> 자투리 평행주차 넣기 (2.0×6.0m)</label>
+          <p class="hint">주차장법 시행규칙 제3조①1: 평행주차형식 일반형 2.0×6.0m 이상. 직각 칸이 못 들어가는 차로 옆 빈 띠(폭 2m 이상)에 차로와 나란히 넣습니다. 확장형 30%는 평행 칸을 뺀 칸 수 기준.</p>
           <div class="dialog-actions"><button type="button" id="close-disabled-dialog">확인</button></div>
         </dialog>
         <div class="split">
@@ -143,6 +168,10 @@
           </label>
           <p id="clear-readout" class="hint">차로 유효높이 2.3m 이상</p>
         </div>
+        <label class="check" id="ground-access-row">
+          <input id="no-ground-access" type="checkbox" checked />
+          지상공원형 단지 (지상에 차 없음) → 지하 차로 2.7m <span class="info" tabindex="0" title="차가 지하로만 다니는 단지는 택배차가 지하로 들어가야 해서 차로 2.7m 이상(주택건설기준 규칙 제6조의2). 지상 도로로 동 앞까지 갈 수 있으면 체크 해제(2.3m).">ⓘ</span>
+        </label>
         <div class="split">
           <label>
             도로 접한 변
@@ -154,12 +183,11 @@
             </select>
           </label>
           <label>
-            램프 위치
+            램프 위치 <span class="info" tabindex="0" title="램프는 도로에서 바로 들어오므로 도로 접한 변에 둡니다. 자동은 양 끝·가운데를 모두 짜 보고 대수가 가장 많은 곳을 고릅니다. 도로변 3m는 경사 8.5% 이하로 자동 반영.">ⓘ</span>
             <select id="ramp-pos"></select>
           </label>
         </div>
         <p id="ramp-pos-note" class="hint warn"></p>
-        <p class="hint">램프는 도로에서 바로 진입하므로 도로에 접한 변에 둡니다. 램프 위치 `자동`은 그 변의 양 끝·가운데를 모두 돌려 보고 대수가 가장 많은 곳을 고릅니다. 도로변 3m 구간은 경사 8.5% 이하로 자동 반영됩니다.</p>
         <div class="split">
           <label>
             램프 배치
@@ -178,10 +206,9 @@
         </div>
         <div id="site-margin-row">
           <label>
-            대지 여유 (외부 램프용, m)
+            대지 여유 (외부 램프용, m) <span class="info" tabindex="0" title="주차장 외곽(지하 외벽)에서 대지 경계선까지 거리. 외부 램프가 이 안에 들어가야 합니다.">ⓘ</span>
             <input id="site-margin" type="number" min="0" max="40" step="0.1" value="20" />
           </label>
-          <p class="hint">주차장 외곽(지하 외벽)에서 대지 경계선까지 거리. 외부 램프가 이 안에 들어가야 합니다.</p>
           <div class="split column-row">
             <p id="margin-summary" class="hint"></p>
             <button type="button" id="open-margin-dialog" class="ghost tiny">방향별 설정</button>
@@ -201,11 +228,10 @@
           </dialog>
         </div>
         <select id="circulation" hidden><option value="ccw" selected>반시계</option></select><!-- 순환 방향은 자동 -->
-        <p class="hint">기둥 간격은 중심 간격입니다. 8.1m, 기둥 0.5m이면 순간격 7.6m에 2.5m 칸이 3대, 이격 0.05m입니다. 대지 여유는 건축선 밖에 외부 램프를 둘 수 있는 폭입니다.</p>
         <table id="demand-table" class="demand"></table>
         <p id="demand-note" class="hint"></p>
-        <p class="hint">개략 검토용이며, 실제 인허가는 해당 지자체 조례와 최신 법령을 확인해야 합니다.</p>
-        <dl class="preview" id="plate-preview"></dl>
+        <p class="hint small">개략 검토용 · 실제 인허가는 지자체 조례와 최신 법령 확인</p>
+        <dl class="preview" id="plate-preview" hidden></dl>
         <p id="input-error" class="error" hidden></p>
         <button id="generate" type="button" class="primary">평면 만들기</button>
         <div class="split column-row example-row">
@@ -250,7 +276,7 @@
             <p id="core-search-note" class="hint"></p>
             <button type="button" id="auto-core" class="ghost tiny">코어 자리 자동 찾기</button>
           </div>
-          <p class="hint">코어는 기둥 격자에 맞춰 놓입니다(끌면 기둥 면에 붙음). 평면 만들기 때 격자 칸을 모두 돌려 보고 대수가 가장 많은 자리에 둡니다(직접 옮기면 그 자리를 유지). 추천은 기둥 간격 기준 계단+승강기 2대 코어(약 50㎡ 이상)가 들어가는 가장 작은 칸 수입니다.</p>
+          <p class="hint">코어는 기둥 격자에 맞춰 놓입니다(1칸 = 기둥 간격, 예: 8.1×8.1m. 코어 칸에는 기둥을 두지 않고 코어 벽이 받음). 평면 만들기 때 격자 칸을 모두 돌려 보고 대수가 가장 많은 자리에 둡니다(직접 옮기면 그 자리를 유지). 추천은 기둥 간격 기준 계단+승강기 2대 코어(약 50㎡ 이상)가 들어가는 가장 작은 칸 수입니다.</p>
           <dialog id="core-dialog" class="settings-dialog">
             <h3>코어 직접 설정</h3>
             <label>
@@ -329,14 +355,14 @@
               </label>
               <label>
                 램프 길이 (m)
-                <input id="ramp-length" type="number" min="6" step="0.1" value="18" />
+                <input id="ramp-length" type="number" min="6" step="0.1" value="18" readonly tabindex="-1" title="층고로 자동 계산(직선 17%·곡선 14%·완화구간)" />
               </label>
             </div>
             <label>
               선택 개구부 폭 (m)
               <input id="entrance-width" type="number" min="3" max="12" step="0.1" value="6" />
             </label>
-            <p class="hint">램프 길이는 층고로 자동 계산한 최소 길이입니다(도로변 3m·완화구간 포함). 더 짧으면 경사 초과로 탈락하고, 더 길면 경사는 완만해지지만 주차 대수가 줄 수 있습니다. 폭은 양방향 직선 6m · 곡선 6.5m가 법정 최소입니다.</p>
+            <p class="hint">램프 길이는 층고로 자동 고정됩니다(직선 17%·곡선 14%, 도로변 3m·완화구간 포함). 평면이 짧으면 곡선으로 꺾어 넣습니다. 폭은 양방향 직선 6m · 곡선 6.5m가 법정 최소입니다.</p>
             <div class="dialog-actions">
               <button type="button" id="ramp-auto" class="ghost">자동값으로</button>
               <button type="button" id="close-ramp-dialog">확인</button>
@@ -352,7 +378,8 @@
 
         <dl class="preview" id="plan-stats"></dl>
         <div id="floor-stack" class="floors"></div>
-        <p id="step2-error" class="error" hidden></p>
+        <div id="step2-error" class="error issue-box" hidden></div>
+        <div id="step2-warn" class="warn issue-box" hidden></div>
         <button id="to-3d" type="button" class="primary">결과 보기</button>
       </section>
 
@@ -376,7 +403,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r163</span>
+        <br /><span class="hint">버전 2026-11-10 · r221</span>
       </p>
     </aside>
 
@@ -391,6 +418,7 @@
         </div>
         <div id="compare-dock" hidden></div>
         <canvas id="plan"></canvas>
+        <div id="plan-alert" class="plan-alert" hidden></div>
       </div>
       <div id="sheet-view" hidden>
         <canvas id="sheet"></canvas>
@@ -399,6 +427,10 @@
         <div id="scene-root"></div>
         <ul class="legend">
           <li><i class="swatch stall"></i>주차구획</li>
+          <li><i class="swatch extended"></i>확장형</li>
+          <li><i class="swatch disabled"></i>장애인</li>
+          <li><i class="swatch eco"></i>친환경차</li>
+          <li><i class="swatch parallel"></i>평행주차</li>
           <li><i class="swatch column"></i>기둥</li>
           <li><i class="swatch core"></i>코어</li>
           <li><i class="swatch ramp"></i>램프</li>
@@ -409,6 +441,9 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=163"></script>
+    <script type="module" src="src/main.js?v=221"></script>
+      <div id="busy" class="busy" hidden role="status" aria-live="polite">
+      <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
+    </div>
   </body>
 </html>

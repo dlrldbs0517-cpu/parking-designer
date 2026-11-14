@@ -6,7 +6,7 @@ import {
   uses,
   zoneFactors,
   zoneUseStatus,
-} from "./parkingRules.js?v=163";
+} from "./parkingRules.js?v=221";
 
 export function emptyDemand() {
   return {
@@ -37,6 +37,8 @@ export function emptyDemand() {
     },
   };
 }
+
+const ECO_PUBLIC_USES = ["office", "retail", "lodging", "culture", "medical", "amusement"];
 
 function round1(value) {
   return Math.round(value * 10) / 10;
@@ -97,6 +99,8 @@ export function calculateDemand(demand, plate, spacing = 8) {
   let households = 0;
   let housingSum = 0;
   let facilityRaw = 0;
+  let aptHouseholds = 0;
+  const publicUses = [];
 
   for (const use of uses) {
     if (!source.active?.[use.id]) continue;
@@ -107,6 +111,7 @@ export function calculateDemand(demand, plate, spacing = 8) {
       const scaled = result.raw * factor;
       const stalls = scaled <= 0 ? 0 : Math.ceil(scaled - 1e-9);
       households += use.id === "officetel" ? 0 : result.households;
+      if (use.id === "apartment") aptHouseholds += result.households;
       housingSum += stalls;
       rows.push({
         use: use.label,
@@ -128,6 +133,7 @@ export function calculateDemand(demand, plate, spacing = 8) {
       });
     } else {
       const area = Math.max(0, Number(source.areas?.[use.id]) || 0);
+      if (area > 0 && ECO_PUBLIC_USES.includes(use.id)) publicUses.push(use.label);
       const raw = (area / use.per) * factor;
       facilityRaw += raw;
       rows.push({
@@ -149,10 +155,17 @@ export function calculateDemand(demand, plate, spacing = 8) {
   const floorArea = legalStalls ? totalArea / plannedFloors : 0;
   const actualArea = plate ? plate.width * plate.depth : 0;
   const neededFloors = actualArea > 0 && legalStalls ? Math.max(1, Math.ceil(totalArea / actualArea)) : plannedFloors;
+  // 친환경차 전용주차구역 대상(친환경자동차법 시행령 제18조의5): 총주차대수 50대 이상 +
+  // 100세대 이상 아파트 또는 공중이용시설(업무·판매·숙박·문화·의료·위락). 근생·오피스텔·연립·다세대만이면 대상 아님.
+  const ecoBasis = aptHouseholds >= 100 ? `공동주택 ${aptHouseholds}세대` : publicUses.length ? publicUses.join("·") : "";
+  const ecoAuto = legalStalls >= 50 && Boolean(ecoBasis);
   return {
     rows,
     legalStalls,
     households,
+    aptHouseholds,
+    ecoAuto,
+    ecoBasis,
     areaPerStall,
     totalArea,
     plannedFloors,

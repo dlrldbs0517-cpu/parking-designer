@@ -1,4 +1,4 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=163";
+import { calculateDemand, emptyDemand } from "./demand.js?v=221";
 import {
   basementCount,
   clampCore,
@@ -8,13 +8,14 @@ import {
   FLOOR_H,
   minStraightRampLength,
   rampTransitions,
+  rampPositionCheck,
   generateVariants,
   intervalsOverlap,
   layoutParking,
   referenceCase,
   searchPlacement,
   snapCore,
-} from "./layout.js?v=163";
+} from "./layout.js?v=221";
 
 export const state = {
   step: 1,
@@ -27,6 +28,7 @@ export const state = {
   columnSpacing: 8.1,
   columnWidth: 0.5,
   columnDepth: 0.5,
+  wallColumns: "back",   // 벽 쪽 줄 기둥: back = 외벽에 붙임, front = 안쪽(주차줄 앞·모듈선)으로 당김
   minClear: 0,   // 기둥 면과 주차칸 선 사이 여유. 법정 값 없음(칸 크기만 확보하면 됨).
   siteMargin: 20,
   siteMargins: { n: null, s: null, e: null, w: null },
@@ -34,7 +36,7 @@ export const state = {
   coreAuto: true,  // 평면 만들기 때 코어 자리를 자동 탐색(평면에서 코어를 직접 옮기면 끔)
   rampPos: "auto", // 그 변 안 램프 위치: auto(대수 최대) · start(서/남 끝) · mid · end(동/북 끝)   // 방향별 대지 여유(비우면 공통 값)
   // 장애인전용 주차구획. 적용 대상인지는 법정 대수(10대 이상)로 판단한다.
-  stallRules: { disabled: true, disabledRate: 0.03 },
+  stallRules: { disabled: true, disabledRate: 0.03, ecoMode: "auto", ecoRate: 0.05, parallel: true },
   rampPlacement: "internal",
   entranceMode: "separate",
   circulation: "ccw",
@@ -44,6 +46,7 @@ export const state = {
   // 도로와 접하는 부분부터 3m는 8.5% 이하 (주차장법 시행규칙 제6조①5바)
   // 층고(m). 유효높이 = 층고 − 슬래브 0.28m가 차로 기준 2.3m 이상이어야 한다.
   floorHeight: 3.2,
+  noGroundAccess: true,   // 공동주택: 지상에 동별 차량 접근 없음(지상공원형) → 지하 차로 높이 2.7m
   // 기둥 간격을 가로·세로 따로 쓸 때 (예: "8.1,8.4,9"). 비우면 columnSpacing 하나로.
   spansX: "",
   spansY: "",
@@ -101,10 +104,12 @@ export function plateFromState() {
     columnWidth: round1(state.columnWidth),
     columnDepth: round1(state.columnDepth),
     minClear: round1(state.minClear * 100) / 100,
+    wallColumns: state.wallColumns || "back",
     siteMargin: round1(state.siteMargin),
     siteMargins: state.siteMargins,
     rampPlacement: state.rampPlacement,
     roadEdge: state.roadEdge,
+    clearRequired: state.demand.active && state.demand.active.apartment && state.noGroundAccess ? 2.7 : 2.3,
     stallRules: currentStallRules(),
     spansX: parseSpans(state.spansX).values,
     spansY: parseSpans(state.spansY).values,
@@ -135,7 +140,7 @@ export function parseSpans(text) {
 /** 화면 설정 + 법정 필요 대수·세대수 → 배치 엔진에 넘길 구획 규칙 */
 export function currentStallRules() {
   const demand = calculateDemand(state.demand, null, state.columnSpacing);
-  return { ...state.stallRules, legalStalls: demand.legalStalls };
+  return { ...state.stallRules, legalStalls: demand.legalStalls, ecoAuto: demand.ecoAuto, ecoBasis: demand.ecoBasis };
 }
 
 function syncCore() {
@@ -149,7 +154,8 @@ function adopt(result, keepObjects) {
   state.columns = result.columns;
   state.drives = result.drives;
   state.route = result.route;
-  state.issues = result.issues;
+  // 자동 생성(배치안 적용)에서는 코어가 자동으로 밀린 건 알릴 필요 없음 — 사용자가 끌어 옮긴 경우(rebuildLayout)만 알림
+  state.issues = keepObjects ? result.issues : result.issues.filter((issue) => issue.type !== "notice");
   state.columnConflicts = result.columnConflicts || [];
   state.clearance = result.clearance || null;
   state.metrics = result.metrics;
@@ -213,6 +219,11 @@ export function rebuildLayout() {
     },
   });
   adopt(result, true);
+  // 레이아웃이 코어를 램프 밖으로 밀었으면 화면의 코어도 같은 자리로(3D와 평면이 어긋나지 않게).
+  (result.cores || []).forEach((fixed, i) => {
+    if (state.cores[i]) { state.cores[i].x = fixed.x; state.cores[i].y = fixed.y; }
+  });
+  syncCore();
   // 레이아웃이 램프 위치·폭을 보정했으면(벽에 붙이기, 곡선 6.5m) 화면의 램프도 맞춘다.
   (result.ramps || []).forEach((fixed) => {
     const mine = state.ramps.find((ramp) => ramp.id === fixed.id);
@@ -221,12 +232,39 @@ export function rebuildLayout() {
   state.openings = result.openings;
 }
 
+// 도로변에 내부 램프가 어느 위치에도 안 들어가면(예: 긴 변이 도로인데 깊이가 짧음) 옆 변의 도로 쪽 끝으로 옮긴다.
+export function rampFallback(plate = state.plate) {
+  if (state.rampPlacement !== "internal" || !plate) return null;
+  const road = state.roadEdge || "w";
+  const check = (edge) => {
+    try { return rampPositionCheck({ ...plate, roadEdge: edge }, state.rampPlacement, state.floorHeight); } catch (error) { return {}; }
+  };
+  const here = check(road);
+  if (["start", "mid", "end"].some((pos) => !here[pos])) return null;
+  const options = {
+    s: [["w", "start"], ["e", "start"]],
+    n: [["w", "end"], ["e", "end"]],
+    w: [["s", "start"], ["n", "start"]],
+    e: [["s", "end"], ["n", "end"]],
+  }[road];
+  for (const [edge, pos] of options) {
+    const c = check(edge);
+    if (!c[pos]) return { edge, pos, reason: here.mid || here.start };
+  }
+  return null;
+}
+
 function seedAccess() {
   // 램프는 조건 단계에서 고른 도로 접한 변의 가운데에서 시작한다(배치안이 그 변 안에서 위치를 다듬음).
-  const edge = state.roadEdge || "w";
+  // 도로변에 안 들어가면 옆 변의 도로 쪽 끝(rampFallback).
+  const fallback = rampFallback();
+  state.accessNote = fallback
+    ? `${EDGE_NAME[state.roadEdge]}(도로변)은 ${fallback.reason || "길이 부족"}로 내부 램프가 들어가지 않아, ${EDGE_NAME[fallback.edge]} 변의 도로 쪽 끝에 램프를 두었습니다.`
+    : null;
+  const edge = fallback ? fallback.edge : (state.roadEdge || "w");
   const along = edge === "n" || edge === "s" ? state.plate.width : state.plate.depth;
   if (state.ramps.length && state.ramps[0].edge !== edge) state.ramps = [];
-  const pos = state.rampPos === "auto" ? "start" : state.rampPos;
+  const pos = fallback ? fallback.pos : (state.rampPos === "auto" ? "start" : state.rampPos);
   if (!state.ramps.length) {
     state.ramps = [{
       id: state.nextId++,
@@ -241,6 +279,7 @@ function seedAccess() {
     state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos, placement: state.rampPlacement }));
   }
 }
+const EDGE_NAME = { n: "북측", s: "남측", e: "동측", w: "서측" };
 
 
 // 코어 자리 자동 탐색: 기둥 격자 칸을 모두 돌려 보고, 지금 자리보다 추천안 대수가 많으면 옮긴다.
@@ -288,8 +327,9 @@ export function generatePlate() {
   state.plate = plateFromState();
   // 램프 길이는 층고·법정 대수(완화구간)로 정한 최소 길이보다 짧으면 안 된다.
   const autoLength = minStraightRampLength(state.floorHeight, rampTransitions({ legalStalls: state.plate.legalStalls }));
-  if (!(state.rampLength >= autoLength - 0.05)) state.rampLength = autoLength;
-  state.ramps = state.ramps.map((ramp) => (ramp.length >= autoLength - 0.05 ? ramp : { ...ramp, length: autoLength }));
+  // 순서: 층고 → 법정 경사(직선 17%, 곡선 14%, 완화구간)로 램프 길이 고정 → 배치. 사용자가 길이를 바꾸지 않는다.
+  state.rampLength = autoLength;
+  state.ramps = state.ramps.map((ramp) => ({ ...ramp, length: autoLength }));
   if (!state.cores.length) state.cores = [defaultCore(state.plate)];
   // 격자 맞춤 코어는 기둥 간격이 바뀌었어도 같은 칸 수로 다시 맞춘다.
   state.cores = state.cores.map((core) => {
@@ -297,14 +337,14 @@ export function generatePlate() {
     const step = state.plate.spacing || 8.1;
     const nx = core.nx || 1;
     const ny = core.ny || 1;
-    const sized = { ...core, nx, ny, w: nx * step - state.plate.columnWidth, d: ny * step - state.plate.columnDepth, grid: true };
+    const sized = { ...core, nx, ny, w: nx * step, d: ny * step, grid: true };
     return clampCore(snapCore(clampCore(sized, state.plate), state.plate), state.plate);
   });
   syncCore();
   seedAccess();
   state.referenceNotes = [];
   refreshVariants();
-  if (state.rampPos === "auto") {
+  if (state.rampPos === "auto" && !state.accessNote) {
     // 도로변 안에서 끝·가운데·끝을 모두 돌려 보고 추천안 대수가 가장 많은 위치를 쓴다.
     const scoreOf = () => {
       const v = state.variants.find((item) => item.recommended) || state.variants[0];
@@ -393,9 +433,27 @@ export function setStep(step) {
   emit();
 }
 
+// 3D로 못 넘어가는 문제(배치 자체가 불가능)와, 넘어가되 알려 줄 주의 사항을 나눈다.
+const BLOCKING = new Set(["opening", "ramp", "network", "column", "slope", "site", "overlap", "empty"]);
+export function issueGroups() {
+  const errors = [];
+  const warnings = [];
+  if (!state.plate) return { errors, warnings };
+  if (!state.cores.length) errors.push("코어가 없습니다.");
+  if (!state.ramps.length) errors.push("램프를 평면 외곽에 놓으세요.");
+  if (!state.openings.length) errors.push("입구 또는 출구를 평면 외곽에 놓으세요.");
+  (state.issues || []).forEach((issue) => {
+    if (state.accessNote && issue.type === "road") return;   // 도로변에 램프가 안 들어가 옆 변으로 옮긴 경우는 아래 안내로 대신
+    (BLOCKING.has(issue.type) ? errors : warnings).push(issue.label);
+  });
+  if (state.accessNote) warnings.push(state.accessNote);
+  if (state.metrics && state.metrics.columnHits > 0 && !errors.some((e) => e.includes("기둥 충돌"))) errors.push(`주차칸-기둥 충돌 ${state.metrics.columnHits}건`);
+  if (!errors.length && !state.connected && state.ramps.length && state.openings.length) errors.push("입구, 램프, 출구가 하나의 차로로 이어지지 않습니다.");
+  return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
+}
+
 export function readyFor3d() {
-  const columnBlocked = state.issues.some((issue) => issue.type === "column") || (state.metrics && state.metrics.columnHits > 0);
-  return Boolean(state.plate && state.cores.length && state.openings.length && state.ramps.length && state.connected && !columnBlocked);
+  return Boolean(state.plate && state.cores.length && state.openings.length && state.ramps.length && state.connected && !issueGroups().errors.length);
 }
 
 export function demandResult() {
@@ -444,8 +502,8 @@ export function updateCore(partial) {
   if (partial.nx != null || partial.ny != null) {
     merged.grid = true;
     const step = state.plate.spacing || 8.1;
-    merged.w = (merged.nx || 1) * step - (state.plate.columnWidth || 0.5);
-    merged.d = (merged.ny || 1) * step - (state.plate.columnDepth || 0.5);
+    merged.w = (merged.nx || 1) * step;
+    merged.d = (merged.ny || 1) * step;
   }
   const next = clampCore(snapCore(clampCore(merged, state.plate), state.plate), state.plate);
   if (![next.x, next.y, next.w, next.d].every(Number.isFinite)) return;
@@ -584,7 +642,11 @@ export function updateEntranceWidth(width) {
 
 export function updateRampSize(partial) {
   if (partial.width != null) state.rampWidth = partial.width;
-  if (partial.length != null) state.rampLength = partial.length;
+  if (partial.length != null) {
+    // 램프 길이는 층고로 고정(직선 17%·곡선 14%) — 입력값은 무시
+    partial = { ...partial, length: minStraightRampLength(state.floorHeight, rampTransitions({ legalStalls: state.plate.legalStalls })) };
+    state.rampLength = partial.length;
+  }
   const selected = selectedRamp() || state.ramps[0];
   if (selected) {
     const index = state.ramps.findIndex((item) => item.id === selected.id);

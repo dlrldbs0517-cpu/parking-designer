@@ -1,8 +1,9 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=163";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=163";
-import { drawThumb, mountPlan } from "./plan.js?v=163";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=163";
-import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=163";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=221";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=221";
+import { drawThumb, mountPlan } from "./plan.js?v=221";
+import { stallRuleTargets } from "./stallTypes.js?v=221";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=221";
+import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=221";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -40,8 +41,16 @@ $("column-size").addEventListener("input", () => {
   state.columnDepth = size;
   render();
 });
+$("wall-columns").addEventListener("change", () => {
+  state.wallColumns = $("wall-columns").value;
+  render();
+});
 $("min-clear").addEventListener("input", () => {
   state.minClear = numberOr($("min-clear").value, state.minClear);
+  render();
+});
+$("no-ground-access").addEventListener("change", () => {
+  state.noGroundAccess = $("no-ground-access").checked;
   render();
 });
 $("floor-height").addEventListener("input", () => {
@@ -66,6 +75,20 @@ $("stall-types").addEventListener("change", () => {
 });
 $("disabled-rate").addEventListener("change", () => {
   state.stallRules = { ...state.stallRules, disabledRate: Number($("disabled-rate").value) };
+  render();
+});
+$("parallel-fill").addEventListener("change", () => {
+  state.stallRules = { ...state.stallRules, parallel: $("parallel-fill").checked };
+  render();
+});
+$("eco-mode").addEventListener("change", () => {
+  state.stallRules = { ...state.stallRules, ecoMode: $("eco-mode").value };
+  render();
+});
+$("eco-rate").addEventListener("change", () => {
+  const pct = Math.min(20, Math.max(1, Number($("eco-rate").value) || 5));
+  $("eco-rate").value = pct;
+  state.stallRules = { ...state.stallRules, ecoRate: pct / 100 };
   render();
 });
 $("site-margin").addEventListener("input", () => {
@@ -116,9 +139,15 @@ function renderRampPos() {
   }
   if (document.activeElement !== select) select.value = state.rampPos;
   const why = rampCheck[state.rampPos];
-  $("ramp-pos-note").textContent = why
-    ? `이 크기에서는 이 위치에 램프가 들어가지 않습니다(${why}). 자동이나 다른 위치를 고르세요.`
-    : "";
+  const allBlocked = state.rampPlacement === "internal" && ["start", "mid", "end"].every((pos) => rampCheck[pos]);
+  const fb = allBlocked ? rampFallback(plate) : null;
+  $("ramp-pos-note").textContent = allBlocked
+    ? (fb
+      ? `도로변 어디에도 내부 램프가 들어가지 않습니다(${why}). 평면을 만들면 옆 변의 도로 쪽 끝에 램프를 둡니다.`
+      : `도로변 어디에도 내부 램프가 들어가지 않습니다(${why}). 외부 램프를 고르거나 평면 크기를 바꾸세요.`)
+    : why
+      ? `이 크기에서는 이 위치에 램프가 들어가지 않습니다(${why}). 자동이나 다른 위치를 고르세요.`
+      : "";
 }
 $("ramp-placement").addEventListener("change", () => {
   state.rampPlacement = $("ramp-placement").value;
@@ -132,14 +161,34 @@ $("circulation").addEventListener("change", () => {
   state.circulation = $("circulation").value;
   render();
 });
+// 무거운 계산(배치안 여러 개 생성) 동안 "만드는 중" 표시. 화면이 먼저 그려지도록 한 프레임 쉰 뒤 계산한다.
+let busyNow = false;
+function busy(label, work) {
+  if (busyNow) return;
+  busyNow = true;
+  const overlay = $("busy");
+  $("busy-text").textContent = label;
+  overlay.hidden = false;
+  document.body.classList.add("is-busy");
+  requestAnimationFrame(() => setTimeout(() => {
+    try {
+      work();
+    } finally {
+      overlay.hidden = true;
+      document.body.classList.remove("is-busy");
+      busyNow = false;
+    }
+  }, 30));
+}
+
 $("load-reference").addEventListener("click", () => {
   if (!inputsValid()) return;
-  loadReference();
+  busy("기준 사례 불러오는 중…", loadReference);
 });
 
 $("generate").addEventListener("click", () => {
   if (!inputsValid()) return;
-  generatePlate();
+  busy("평면 만드는 중… (배치안 여러 개를 비교해요)", generatePlate);
 });
 
 document.querySelectorAll("#tools button").forEach((button) => {
@@ -151,7 +200,7 @@ fields.coreArea.addEventListener("change", () => updateCoreArea(Number(fields.co
 $("core-nx").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
 $("core-ny").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
 $("open-core-dialog").addEventListener("click", () => $("core-dialog").showModal());
-$("auto-core").addEventListener("click", () => autoPlaceCore());
+$("auto-core").addEventListener("click", () => busy("코어 자리 찾는 중…", autoPlaceCore));
 $("close-core-dialog").addEventListener("click", () => $("core-dialog").close());
 fields.coreW.addEventListener("change", () => updateCore({ w: Number(fields.coreW.value) }));
 fields.coreD.addEventListener("change", () => updateCore({ d: Number(fields.coreD.value) }));
@@ -165,7 +214,7 @@ $("ramp-auto").addEventListener("click", () => {
   const auto = autoRampLength();
   updateRampSize({ length: auto, width: autoRampWidth() });
 });
-fields.rampLength.addEventListener("change", () => updateRampSize({ length: Number(fields.rampLength.value) }));
+// 램프 길이는 층고로 자동 고정(읽기 전용)
 
 $("place-split").addEventListener("click", placeSplitExample);
 $("place-overlap").addEventListener("click", placeOverlapExample);
@@ -267,7 +316,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=163")
+    sceneMount = import("./scene.js?v=221")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -312,7 +361,7 @@ function render() {
     const sx = parseSpans(state.spansX).error;
     const sy = parseSpans(state.spansY).error;
     $("input-error").textContent = !floorHeightOk()
-      ? `층고 ${state.floorHeight}m는 사용할 수 없습니다. 유효높이(층고 − 슬래브 ${SLAB_T}m)가 차로 기준 ${CLEAR_HEIGHT}m 이상이 되도록 ${(CLEAR_HEIGHT + SLAB_T).toFixed(2)}–6m로 입력하세요.`
+      ? `층고 ${state.floorHeight}m는 사용할 수 없습니다. 유효높이(층고 − 슬래브 ${SLAB_T}m)가 차로 기준 ${needClear()}m 이상이 되도록 ${(needClear() + SLAB_T).toFixed(2)}–6m로 입력하세요.`
       : sx ? `기둥 간격 가로: ${sx}. 쉼표로 구분한 3–15m 숫자로 입력하세요.`
       : sy ? `기둥 간격 세로: ${sy}. 쉼표로 구분한 3–15m 숫자로 입력하세요.`
         : "가로·세로는 18–300m, 기둥 간격은 5–12m로 입력하세요.";
@@ -321,16 +370,20 @@ function render() {
   $("floor-height").classList.toggle("bad", !floorHeightOk());
   {
     const clear = clearHeightOf(Number(state.floorHeight) || 0);
-    const okText = clear >= CLEAR_HEIGHT - 1e-9 ? "✓" : "✗ 2.3m 미만";
+    const need = needClear();
+    const okText = clear >= need - 1e-9 ? "✓" : `✗ ${need}m 미만`;
     const tr = rampTransitions({ legalStalls: currentStallRules().legalStalls });
     const ease = [tr.top ? `윗부분 ${tr.top}m` : "", tr.bottom ? `아랫부분 ${tr.bottom}m` : ""].filter(Boolean).join("·");
-    $("clear-readout").textContent = `유효높이 ${clear.toFixed(2)}m ${okText} (차로 2.3m 이상 필요) · 직선 램프 최소 ${minStraightRampLength(Number(state.floorHeight) || 0, tr)}m${ease ? ` (8.5% 구간: ${ease})` : ""}`;
+    const apt = Boolean(state.demand.active && state.demand.active.apartment);
+    $("ground-access-row").hidden = !apt;
+    if (document.activeElement !== $("no-ground-access")) $("no-ground-access").checked = state.noGroundAccess;
+    $("clear-readout").textContent = `유효 ${clear.toFixed(2)}m ${clear >= need - 1e-9 ? "✓" : "✗"} (기준 ${need}m)`;
   }
   $("spans-y").classList.toggle("bad", Boolean(parseSpans(state.spansY).error));
 
   const area = (state.parkWidth > 0 ? state.parkWidth : 0) * (state.parkDepth > 0 ? state.parkDepth : 0);
   const bay = stallsPerBay(state.columnSpacing, state.columnWidth, state.minClear);
-  $("bay-readout").textContent = `구간당 ${bay.count}대, 이격 ${bay.gap.toFixed(2)}m (순간격 ${bay.clear.toFixed(2)}m)`;
+  const bayText = `구간당 ${bay.count}대`;
   $("plate-preview").innerHTML = statList([
     ["주차장 크기", `${formatMeters(state.parkWidth)} × ${formatMeters(state.parkDepth)}`],
     ["주차장 면적", formatArea(area)],
@@ -341,7 +394,12 @@ function render() {
   {
     const spanText = (v) => (v && String(v).trim() ? String(v).trim() : "기본");
     $("demand-summary").textContent = `조례 배율 ${state.demand.ordinance} · 크기 추천: 1대당 ${state.demand.areaPerStall}㎡, 지하 ${state.demand.plannedFloors}층`;
-    $("column-summary").textContent = `단면 ${$("column-size").value}m · 이격 ${$("min-clear").value}m · 가로 간격 ${spanText($("spans-x").value)} · 세로 간격 ${spanText($("spans-y").value)}`;
+    {
+      const sx = spanText($("spans-x").value);
+      const sy = spanText($("spans-y").value);
+      const custom = $("spans-x").value.trim() || $("spans-y").value.trim() ? ` · 가로 ${sx} · 세로 ${sy}` : "";
+      $("column-summary").textContent = `기둥 ${$("column-size").value}m · ${bayText}${Number($("min-clear").value) ? ` · 이격 ${$("min-clear").value}m` : ""}${custom}`;
+    }
   }
   setIfIdle(fields.width, state.parkWidth);
   setIfIdle(fields.depth, state.parkDepth);
@@ -373,7 +431,7 @@ function render() {
     ["필요 지하층", info.floors ? `${info.floors}층` : "—"],
     ["총 주차대수", `${info.totalStalls}대`],
     ["1대당 면적", info.placed ? formatArea(info.areaPerStall) : "—"],
-    ["유사도", state.metrics ? `${info.similarity}점` : "—"],
+    ...(isReference() ? [["예시 도면 유사도", state.metrics ? `${info.similarity}점` : "—"]] : []),
     ["차로 면적 비율", state.metrics ? `${Math.round(info.aisleRatio * 100)}%` : "—"],
     ["동선 연결", state.plate ? (info.connected ? "연결" : "끊김") : "—"],
   ];
@@ -393,6 +451,8 @@ function render() {
     const mark = (have, need) => (need ? `${have}/${need}${have >= need ? "" : " ⚠"}` : `${have}`);
     rows.push(["장애인전용", mark(c.disabled, t.disabled)]);
     if (t.extended) rows.push(["확장형 (30%)", mark(c.extended, t.extended)]);
+    if (t.eco) rows.push([`친환경차 (${Math.round((t.ecoRate || 0.05) * 100)}%)`, mark(c.eco || 0, t.eco)]);
+    if (c.parallel) rows.push(["평행주차 (자투리)", `${c.parallel}칸`]);
   }
   $("plan-stats").innerHTML = statList(rows, 3);
   $("scene-stats").innerHTML = statList(rows, 3);
@@ -449,15 +509,23 @@ function render() {
   renderCompare();
   renderCorePick();
 
-  const messages = [];
-  if (!state.openings.length) messages.push("입구 또는 출구를 평면 외곽에 놓으세요.");
-  if (!state.ramps.length) messages.push("램프를 평면 외곽에 놓으세요.");
-  if (state.openings.length && state.ramps.length && !state.connected) {
-    messages.push(...(state.issues.length ? state.issues.map((issue) => issue.label) : ["입구, 램프, 출구가 하나의 차로로 이어지지 않습니다."]));
-  }
-  $("step2-error").hidden = messages.length === 0;
-  $("step2-error").textContent = messages.join(" ");
-  $("to-3d").disabled = !readyFor3d();
+  // 불가능한 배치 → 빨간 상자에 원인(3D 막힘), 가능하지만 알릴 것 → 노란 상자(3D 가능)
+  const { errors, warnings } = issueGroups();
+  const listHtml = (items) => `<ul>${items.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`;
+  $("step2-error").hidden = errors.length === 0;
+  $("step2-error").innerHTML = errors.length ? `<strong>3D를 만들 수 없습니다 — 원인</strong>${listHtml(errors)}` : "";
+  $("step2-warn").hidden = warnings.length === 0;
+  $("step2-warn").innerHTML = warnings.length ? `<strong>주의 (3D는 만들 수 있음)</strong>${listHtml(warnings)}` : "";
+  // 같은 내용을 평면 위(오른쪽 아래)에도 띄워, 끌어 옮기는 중에 바로 보이게 한다.
+  const alert = $("plan-alert");
+  const boxes = [];
+  if (errors.length) boxes.push(`<div class="issue-box error"><strong>3D 불가 — 원인</strong>${listHtml(errors)}</div>`);
+  if (warnings.length) boxes.push(`<div class="issue-box warn"><strong>주의</strong>${listHtml(warnings)}</div>`);
+  alert.hidden = step !== 2 || !state.variants.length || boxes.length === 0;
+  alert.innerHTML = boxes.join("");
+  const ready = readyFor3d();
+  $("to-3d").disabled = !ready;
+  $("to-3d").title = ready ? "이 배치로 3D 모델을 만듭니다." : `3D 불가: ${errors.join(" / ")}`;
   $("show-conflicts").classList.toggle("on", state.debugColumns);
 
   const stageText = ["", "외곽 주차칸", "순환 차로", "내부 베이", "기둥", "코어 우회", "동선 화살표"];
@@ -481,7 +549,7 @@ function renderCorePick() {
 function renderCompare() {
   const dock = $("compare-dock");
   if (dock.hidden) return;
-  const key = state.variants.map((variant) => `${variant.id}:${variant.metrics.stalls}:${variant.metrics.valid}:${variant.recommended}:${variant.maxStalls}`).join("|") + `#${state.variantIndex}`;
+  const key = state.variants.map((variant) => `${variant.id}:${variant.metrics.stalls}:${variant.metrics.valid}:${variant.recommended}:${variant.maxStalls}`).join("|") + `#${state.variantIndex}#${isReference()}`;
   if (key === compareKey && dock.childElementCount) {
     dock.querySelectorAll(".compare-card").forEach((card, index) => {
       card.classList.toggle("on", index === state.variantIndex);
@@ -501,8 +569,9 @@ function renderCompare() {
       variant.maxStalls ? '<span class="tag max">최대 주차칸</span>' : "",
       variant.uniform ? '<span class="tag uniform">방향 통일</span>' : "",
       variant.coreSide ? '<span class="tag uniform">장애인 코어 인접</span>' : "",
+      variant.coreRamp ? '<span class="tag uniform">코어 램프 인접</span>' : "",
     ].filter(Boolean).join(" ");
-    button.innerHTML = `<p>${tags ? `${tags} ` : ""}${variant.id} ${variant.name}<br>${metrics.stalls}대 · ${metrics.areaPerStall.toFixed(1)}㎡/대 · 유사 ${metrics.similarity}<br>${metrics.connected ? "연결" : "끊김"} · 충돌 ${metrics.columnHits} · 막다른 ${metrics.deadEnds}${metrics.valid ? "" : ` · 탈락 ${metrics.rejected}`}</p>`;
+    button.innerHTML = `<p>${tags ? `${tags} ` : ""}${variant.id} ${variant.name}<br>${metrics.stalls}대 · ${metrics.areaPerStall.toFixed(1)}㎡/대${isReference() ? ` · 유사 ${metrics.similarity}` : ""}<br>${metrics.connected ? "연결" : "끊김"} · 충돌 ${metrics.columnHits} · 막다른 ${metrics.deadEnds}${metrics.valid ? "" : ` · 탈락 ${metrics.rejected}`}</p>`;
     button.prepend(canvas);
     button.addEventListener("click", () => applyVariant(index));
     dock.appendChild(button);
@@ -554,7 +623,12 @@ function inputsValid() {
 /** 유효높이(층고 − 슬래브)가 차로 기준 2.3m 이상이고, 층고가 6m 이하인지 */
 function floorHeightOk() {
   const h = Number(state.floorHeight);
-  return h > 0 && h <= 6 && clearHeightOf(h) >= CLEAR_HEIGHT - 1e-9;
+  return h > 0 && h <= 6 && clearHeightOf(h) >= needClear() - 1e-9;
+}
+
+// 차로 유효높이 기준: 공동주택 + 지상공원형이면 2.7m, 아니면 2.3m
+function needClear() {
+  return requiredClearHeight({ apartment: Boolean(state.demand.active && state.demand.active.apartment), noGroundAccess: state.noGroundAccess });
 }
 
 function buildDemandForm() {
@@ -600,7 +674,7 @@ function buildDemandForm() {
     state.parkDepth = rec.depth;
     $("park-width").value = String(rec.width);
     $("park-depth").value = String(rec.depth);
-    $("suggest-note").textContent = `${demand.legalStalls}대 × ${demand.areaPerStall}㎡ ÷ ${demand.plannedFloors}층 = 한 층 약 ${Math.round(demand.floorArea)}㎡ → ${rec.width}×${rec.depth}m (기둥 간격 배수). 바꾸려면 고급 설정에서 1대당 면적·지하층 수 조정.`;
+    $("suggest-note").textContent = `→ ${rec.width}×${rec.depth}m (${demand.legalStalls}대 × ${demand.areaPerStall}㎡ ÷ ${demand.plannedFloors}층)`;
     emit();
   });
   ["zone", "region", "project-name", "ordinance", "area-per-stall", "planned-floors"].forEach((id) => {
@@ -628,6 +702,17 @@ function buildDemandForm() {
     if (del) {
       state.demand.active[del] = false;
       renderUseList();
+      emit();
+      return;
+    }
+    const bandDel = event.target.dataset.bandDel;
+    if (bandDel) {
+      // 첫 구간은 남긴다(용도 자체를 지우려면 위의 × 사용)
+      const list = state.demand.bands[bandDel];
+      const index = Number(event.target.dataset.index);
+      if (list.length > 1 && index > 0) list.splice(index, 1);
+      document.querySelector(`[data-fields="${bandDel}"]`).innerHTML = "";
+      syncUseFields();
       emit();
       return;
     }
@@ -676,8 +761,7 @@ function renderUseList() {
         <button type="button" class="ghost tiny use-del" data-del="${use.id}" aria-label="${use.label} 삭제">×</button></div>
       <div class="use-fields" data-fields="${use.id}"></div>
     </div>`).join("")
-    + (hidden.length ? `<p class="hint">${zoneLabel}에서 불가: ${hidden.map((use) => use.label).join(", ")}</p>` : "")
-    + `<p class="hint">${region === "seoul" ? "서울특별시 도시계획 조례 별표 4~10 반영(2026.7.13 시행본)." : "국토계획법 시행령 별표 4~10 개략. \"조례 확인\"은 해당 시·군 도시계획조례로 확인."} 도로 폭·면적 같은 세부 조건은 원문 확인.</p>`;
+    + (hidden.length ? `<p class="hint">${zoneLabel}에서 불가: ${hidden.map((use) => use.label).join(", ")} <span class="info" tabindex="0" title="${region === "seoul" ? "서울특별시 도시계획 조례 별표 4~10 반영(2026.7.13 시행본)." : "국토계획법 시행령 별표 4~10 개략. '조례 확인'은 해당 시·군 도시계획조례로 확인."} 도로 폭·면적 같은 세부 조건은 원문 확인.">ⓘ</span></p>` : "");
   syncUseFields();
 }
 
@@ -687,9 +771,10 @@ function syncUseFields() {
     if (!box || !state.demand.active[use.id] || box.childElementCount) return;
     if (use.kind === "housing") {
       box.innerHTML = state.demand.bands[use.id].map((band, index) => `
-        <div class="split">
+        <div class="band-row">
           <label>세대수 <input data-band="${use.id}" data-index="${index}" data-key="count" type="number" min="0" step="1" value="${band.count}" /></label>
           <label>전용면적 <input data-band="${use.id}" data-index="${index}" data-key="area" type="number" min="0" step="1" value="${band.area}" /></label>
+          ${index > 0 ? `<button type="button" class="ghost tiny band-del" data-band-del="${use.id}" data-index="${index}" aria-label="구간 ${index + 1} 삭제" title="이 구간 삭제">×</button>` : `<span class="band-del-space"></span>`}
         </div>
       `).join("") + `<button type="button" class="ghost tiny" data-add="${use.id}">구간 추가</button>`;
     } else {
@@ -768,10 +853,24 @@ function autoRampWidth() {
   return rampShape({ ...ramp, width: 6 }, state.plate).kind === "curved" ? 6.5 : 6;
 }
 
+// 예시 도면을 불러왔을 때만 "유사도"를 보여 준다(예시 도면과 비교한 점수라 직접 만든 평면에선 의미 없음).
+function isReference() {
+  return Boolean(state.referenceNotes && state.referenceNotes.length);
+}
+
 function typeReadout() {
   if (!$("stall-types").checked) return "일반형(2.5×5.0m)만 배치합니다.";
   const rules = currentStallRules();
-  if (rules.legalStalls < 10) return "법정 10대 미만이라 장애인전용 구획은 의무가 아닙니다.";
-  if (rules.legalStalls >= 50) return `장애인전용 ${Math.round(rules.disabledRate * 100)}% 이상(3.3×5.2m) · 확장형 30% 이상(2.6×5.2m, 법정 50대 이상). 비율을 바꾸면 평면을 다시 생성하세요.`;
-  return `장애인전용 ${Math.round(rules.disabledRate * 100)}% 이상 (3.3×5.0m, 코어 가까이). 비율을 바꾸면 평면을 다시 생성하세요.`;
+  if (rules.legalStalls < 10) return "장애인 구획 의무 없음(10대 미만)";
+  const t = stallRuleTargets(rules);
+  const note = $("eco-note");
+  if (note) note.textContent = `친환경자동차법 시행령 제18조의5·6: 총주차대수 50대 이상인 100세대 이상 아파트·공중이용시설(업무·판매·숙박·문화·의료·위락)은 신축 5% 이상(시·도 조례). 지금 조건: ${rules.ecoAuto ? `대상 (${rules.ecoBasis})` : rules.legalStalls < 50 ? "대상 아님 (50대 미만)" : "대상 아님 (아파트 100세대 미만·공중이용시설 없음)"}. 램프 도착 쪽에 모아 배치.`;
+  const parts = [`장애인 ${Math.round(rules.disabledRate * 100)}%`];
+  if (t.extendedRate) parts.push("확장형 30%");
+  if (t.ecoRate) parts.push(`친환경차 ${Math.round(t.ecoRate * 100)}%`);
+  return parts.join(" · ");
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }

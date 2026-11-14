@@ -1,5 +1,5 @@
-import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=163";
-import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=163";
+import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=221";
+import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=221";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -154,7 +154,7 @@ export function mountPlan(canvas) {
       ctx.lineWidth = (selected ? 2.6 : 1.8) / camera.scale;
       ctx.fillRect(core.x, core.y, core.w, core.d);
       ctx.strokeRect(core.x, core.y, core.w, core.d);
-      label(ctx, `코어 ${index + 1}`, core.x + core.w / 2, core.y + core.d / 2, "#2c4a6e");
+      label(ctx, state.cores.length > 1 ? `코어 ${index + 1}` : "코어", core.x + core.w / 2, core.y + core.d / 2, "#2c4a6e");
     });
 
     if (shown("column")) {
@@ -183,7 +183,6 @@ export function mountPlan(canvas) {
     });
     dimension(ctx, plate);
     drawClearance(ctx);
-    if (shown("loop")) label(ctx, "차로 6m", plate.width / 2, plate.depth / 2, "#8a5a22");
     drawRoute(ctx);
   };
 
@@ -378,21 +377,26 @@ function projectAlong(edge, point) {
   return edge === "n" || edge === "s" ? point.x : point.y;
 }
 
-// 주차구획 색: 일반 · 확장형(연한 초록) · 장애인전용(파랑)
+// 주차구획 색: 일반 · 확장형(연한 초록) · 장애인전용(파랑) · 친환경차(연한 노랑)
 function stallFill(stall) {
   if (stall.type === "disabled") return "#b9d3f0";
+  if (stall.type === "parallel") return "#e6dff0";
+  if (stall.eco) return "#f3e7b0";
   if (stall.type === "extended") return "#dcebd6";
   return "#f7f4ee";
 }
 
 function stallTag(stall) {
   if (stall.type === "disabled") return "장";
+  if (stall.type === "parallel") return "평행";
+  if (stall.eco) return stall.type === "extended" ? "확친" : "친";
   if (stall.type === "extended") return "확";
   return "";
 }
 
 // 카스토퍼(차막이): 차로 반대쪽(뒤쪽) 벽에서 0.9m 안쪽, 가운데 1.6m
 function aisleMark(ctx, stall) {
+  if (stall.type === "parallel") return;   // 평행주차는 차막이 없음
   const back = 0.9;
   ctx.beginPath();
   if (stall.aisle === "n" || stall.aisle === "s") {

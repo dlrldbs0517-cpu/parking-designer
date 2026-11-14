@@ -1,4 +1,4 @@
-import { AISLE, RAMP_SLOPE_STRAIGHT, clearHeightOf, rampFootprint, siteMarginsOf, rampMainSlope, rampShape, rampTransitions } from "./layout.js?v=163";
+import { AISLE, RAMP_SLOPE_STRAIGHT, clearHeightOf, rampFootprint, siteMarginsOf, rampMainSlope, rampShape, rampTransitions } from "./layout.js?v=221";
 
 const EDGE = { n: "북", e: "동", s: "남", w: "서" };
 
@@ -52,19 +52,21 @@ export function renderSheet(paint, state, info, floorIndex) {
 
   const xs = state.gridX?.length ? state.gridX : uniqueSorted([0, plate.width]);
   const ys = state.gridY?.length ? state.gridY : uniqueSorted([0, plate.depth]);
+  // 기둥선(그리드)은 주차장 밖까지 빼서 치수선·기호를 바깥에 둔다: 외벽 → 치수선(28) → 기호(52)
   xs.forEach((x, index) => {
-    paint.line(xOf(x), yOf(plate.depth) - 8, xOf(x), yOf(0) + 8, "#9aa3ad", 0.6);
-    paint.text(xOf(x) - 10, yOf(plate.depth) - 16, `X${index + 1}`, 12, "#333");
+    paint.line(xOf(x), yOf(plate.depth) - 40, xOf(x), yOf(0) + 8, "#9aa3ad", 0.6);
+    paint.text(xOf(x) - 10, yOf(plate.depth) - 46, `X${index + 1}`, 12, "#333");
   });
   ys.forEach((y, index) => {
-    paint.line(xOf(0) - 8, yOf(y), xOf(plate.width) + 8, yOf(y), "#9aa3ad", 0.6);
-    paint.text(xOf(0) - 36, yOf(y) + 4, `Y${index + 1}`, 12, "#333");
+    paint.line(xOf(0) - 40, yOf(y), xOf(plate.width) + 8, yOf(y), "#9aa3ad", 0.6);
+    paint.text(xOf(0) - 66, yOf(y) + 4, `Y${index + 1}`, 12, "#333");
   });
 
   state.stalls.forEach((stall, index) => {
     paint.strokeRect(xOf(stall.x), yOf(stall.y + stall.d), stall.w * scale, stall.d * scale, "#222", 1);
-    const tag = stall.type === "disabled" ? "장" : stall.type === "extended" ? "확" : "";
-    paint.text(xOf(stall.x + stall.w / 2) - 8, yOf(stall.y + stall.d / 2) + 4, String(index + 1) + tag, 11, "#222");
+    // 칸 번호는 빼고 종류만 표시(장애인 '장', 확장형 '확')
+    const tag = stall.type === "parallel" ? "평" : stall.type === "disabled" ? "장" : stall.eco ? (stall.type === "extended" ? "확친" : "친") : stall.type === "extended" ? "확" : "";
+    if (tag) paint.text(xOf(stall.x + stall.w / 2) - 6, yOf(stall.y + stall.d / 2) + 4, tag, 11, "#222");
   });
   state.columns.forEach((column, index) => {
     const sizeW = column.w || 0.5;
@@ -76,7 +78,8 @@ export function renderSheet(paint, state, info, floorIndex) {
     paint.strokeRect(xOf(core.x), yOf(core.y + core.d), core.w * scale, core.d * scale, "#111", 2.4);
     paint.line(xOf(core.x + core.w * 0.34), yOf(core.y + core.d), xOf(core.x + core.w * 0.34), yOf(core.y), "#111", 1);
     paint.line(xOf(core.x + core.w * 0.67), yOf(core.y + core.d), xOf(core.x + core.w * 0.67), yOf(core.y), "#111", 1);
-    paint.text(xOf(core.x + core.w / 2) - 18, yOf(core.y + core.d / 2), `코어 ${index + 1}`, 12, "#111");
+    const name = state.cores.length > 1 ? `코어 ${index + 1}` : "코어";
+    paint.text(xOf(core.x + core.w / 2) - (name.length > 2 ? 18 : 12), yOf(core.y + core.d / 2), name, 12, "#111");
   });
   for (const ramp of state.ramps) {
     const shape = rampShape(ramp, plate);
@@ -126,13 +129,29 @@ export function renderSheet(paint, state, info, floorIndex) {
     if (segment.head === false) paint.line(xOf(segment.x1), yOf(segment.y1), xOf(segment.x2), yOf(segment.y2), color, 1.4);
     else paint.arrow(xOf(segment.x1), yOf(segment.y1), xOf(segment.x2), yOf(segment.y2), color);
   });
-  paint.text(xOf(plate.width / 2) - 28, yOf(plate.depth / 2), `차로 ${AISLE.toFixed(1)}m`, 13, "#1d4e89");
 
   dimension(paint, xOf(0), yOf(0) + 28, xOf(plate.width), yOf(0) + 28, `${plate.width.toFixed(1)} m`);
   dimension(paint, xOf(plate.width) + 28, yOf(0), xOf(plate.width) + 28, yOf(plate.depth), `${plate.depth.toFixed(1)} m`);
-  for (let index = 1; index < xs.length; index += 1) {
-    const y = yOf(plate.depth) + 22 + (index % 2) * 16;
-    dimension(paint, xOf(xs[index - 1]), y, xOf(xs[index]), y, `${(xs[index] - xs[index - 1]).toFixed(1)}`);
+  // 기둥 간격 치수: 주차장 밖(위쪽·왼쪽)에 한 줄로
+  {
+    const y = yOf(plate.depth) - 28;
+    for (let index = 1; index < xs.length; index += 1) {
+      dimension(paint, xOf(xs[index - 1]), y, xOf(xs[index]), y, `${(xs[index] - xs[index - 1]).toFixed(1)}`);
+    }
+    // 외벽 ~ 첫/마지막 기둥선 (외곽 기둥을 평면 안에 넣어 생긴 0.5m)
+    if (xs[0] > 0.05) dimension(paint, xOf(0), y, xOf(xs[0]), y, "");
+    if (plate.width - xs[xs.length - 1] > 0.05) dimension(paint, xOf(xs[xs.length - 1]), y, xOf(plate.width), y, "");
+    xs.forEach((x) => paint.line(xOf(x) - 3, y + 3, xOf(x) + 3, y - 3, "#333", 1));
+    const x = xOf(0) - 28;
+    for (let index = 1; index < ys.length; index += 1) {
+      const y1 = yOf(ys[index - 1]);
+      const y2 = yOf(ys[index]);
+      paint.line(x, y1, x, y2, "#333", 1);
+      paint.text(x - 26, (y1 + y2) / 2 + 4, `${(ys[index] - ys[index - 1]).toFixed(1)}`, 11, "#111");
+    }
+    if (ys[0] > 0.05) paint.line(x, yOf(0), x, yOf(ys[0]), "#333", 1);
+    if (plate.depth - ys[ys.length - 1] > 0.05) paint.line(x, yOf(ys[ys.length - 1]), x, yOf(plate.depth), "#333", 1);
+    ys.forEach((yy) => paint.line(x - 3, yOf(yy) + 3, x + 3, yOf(yy) - 3, "#333", 1));
   }
 
   paint.line(width - 300, 70, width - 300, 118, "#111", 1.4);
@@ -147,17 +166,19 @@ export function renderSheet(paint, state, info, floorIndex) {
   paint.text(margin.l + 90, height - 52, `축척 1:${Math.round(metersPerPx * 1000)}`, 12, "#111");
 
   const boxX = width - 330;
-  const boxY = height - 294;
-  paint.strokeRect(boxX, boxY, 290, 224, "#111", 1.2);
+  const boxY = height - 338;
+  paint.strokeRect(boxX, boxY, 290, 268, "#111", 1.2);
   const lines = [
     ["도면명", `지하 ${floorIndex + 1}층 주차장 평면도`],
     ["프로젝트", state.demand?.projectName || "주차장"],
     ["법정 대수", `${info.required}대`],
     ["배치 대수", `${info.placed}대`],
     ["지하층", `${info.floors}층`],
-    ["층고", plate.floorHeight ? `${plate.floorHeight}m (유효 ${clearHeightOf(plate.floorHeight)}m)` : "—"],
-    ["장애인", info.stallTypes ? `${info.stallTypes.disabled}칸 (번호 옆 '장')` : "—"],
-    ["확장형", info.stallTypes && info.stallTypes.extended ? `${info.stallTypes.extended}칸 2.6×5.2m (번호 옆 '확')` : "—"],
+    ["층고", plate.floorHeight ? `${plate.floorHeight}m (유효 ${clearHeightOf(plate.floorHeight)}m ≥ ${plate.clearRequired || 2.3}m)` : "—"],
+    ["장애인", info.stallTypes ? `${info.stallTypes.disabled}칸 (칸 안 '장')` : "—"],
+    ["확장형", info.stallTypes && info.stallTypes.extended ? `${info.stallTypes.extended}칸 2.6×5.2m (칸 안 '확')` : "—"],
+    ["친환경차", info.stallTypes && info.stallTypes.eco ? `${info.stallTypes.eco}칸 (칸 안 '친')` : "—"],
+    ["평행주차", info.stallTypes && info.stallTypes.parallel ? `${info.stallTypes.parallel}칸 2.0×6.0m (칸 안 '평')` : "—"],
     ["축척", `1:${Math.round((1 / scale) * 1000)}`],
     ["날짜", info.checkedOn || ""],
   ];

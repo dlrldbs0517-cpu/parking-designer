@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=163";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=221";
 // 층고는 입력값(state.plate.floorHeight)을 쓴다
 const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
-import { state, subscribe, summary } from "./state.js?v=163";
+import { state, subscribe, summary } from "./state.js?v=221";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -100,6 +100,10 @@ function rebuild(sun) {
   clearGroup(building);
 
   const plate = state.plate;
+  // 평면 좌표(x 동쪽, y 북쪽)를 3D(x, z)로 옮길 때 z = y로 두면 위에서 본 모습이 평면과 좌우(남북) 뒤집힌 거울상이 된다.
+  // 건물 전체를 z 방향으로 뒤집어(z = 깊이 - y) 평면과 같은 방향으로 맞춘다. (three.js는 음수 배율의 면 방향을 자동 처리)
+  building.scale.set(1, 1, -1);
+  building.position.set(0, 0, plate.depth);
   const concrete = standard("#d5d0c8", 0.86, paint.concrete);
   const columnMat = standard("#8d887f", 0.78, paint.concrete);
   const hazard = standard("#111", 0.6, paint.hazard);
@@ -440,11 +444,28 @@ function segments(length, cuts) {
 }
 
 let disabledMat = null;
+let extendedMat = null;
+let ecoMat = null;
+let parallelMat = null;
 function stallMaterial(stall, fallback) {
-  // 장애인전용은 파란 바닥
-  if (stall.type !== "disabled") return fallback;
-  if (!disabledMat) disabledMat = standard("#3d6fb6", 0.8);
-  return disabledMat;
+  // 장애인전용은 파란 바닥, 확장형은 연한 초록 바닥(평면도 색과 맞춤)
+  if (stall.type === "disabled") {
+    if (!disabledMat) disabledMat = standard("#3d6fb6", 0.8);
+    return disabledMat;
+  }
+  if (stall.type === "parallel") {
+    if (!parallelMat) parallelMat = standard("#a99bc4", 0.8);
+    return parallelMat;
+  }
+  if (stall.eco) {
+    if (!ecoMat) ecoMat = standard("#d8bf4f", 0.8);
+    return ecoMat;
+  }
+  if (stall.type === "extended") {
+    if (!extendedMat) extendedMat = standard("#9cc39a", 0.8);
+    return extendedMat;
+  }
+  return fallback;
 }
 
 function addStallPads(base, material) {
@@ -541,7 +562,8 @@ function gatePoint(opening) {
 function addGroundApproach(ramp, base, material) {
   if ((ramp.placement || "internal") !== "internal") return;
   const plate = state.plate;
-  const k = RAMP_INSET;
+  const fp = rampFootprint(ramp, plate);
+  const k = ramp.edge === "w" ? fp.x : ramp.edge === "e" ? plate.width - fp.x - fp.w : ramp.edge === "s" ? fp.y : plate.depth - fp.y - fp.d;
   const y = base + floorH() + 0.02;
   const w = ramp.width;
   let box;

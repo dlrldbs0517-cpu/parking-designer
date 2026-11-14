@@ -291,7 +291,11 @@ main { position: relative; min-width: 0; min-height: 100%; }
 .swatch.ramp { background: var(--ramp); }
 .swatch.entrance { background: var(--entrance); }
 .swatch.exit { background: var(--accent); }
-.swatch.aisle { background: #c9a36a; }
+.swatch.aisle { background: #2f6b45; }
+.swatch.extended { background: #9cc39a; }
+.swatch.disabled { background: #3d6fb6; }
+.swatch.eco { background: #d8bf4f; }
+.swatch.parallel { background: #a99bc4; }
 
 .picks {
   list-style: none;
@@ -384,3 +388,41 @@ details.advanced summary { cursor: pointer; color: #6b6156; font-size: 13px; }
 .compare-card .tag.uniform { color: #3d6fb6; }
 .hint.warn { color: #b4401c; }
 .hint.warn:empty { display: none; }
+/* ⓘ 설명: 마우스를 올리거나 눌러 포커스하면 말풍선 */
+.info { position: relative; display: inline-block; margin-left: 4px; color: #8a7f70; cursor: help; font-size: 0.85em; font-weight: 400; }
+
+.hint.small { font-size: 11px; opacity: 0.8; }
+label { position: relative; }
+label > .info { position: absolute; top: 0; right: 0; margin: 0; }
+label.check > .info { position: static; margin-left: 4px; }
+/* 3D 범례 색을 3D 재질 색과 맞춤 */
+#scene-view .swatch.stall { background: #b7b4ae; }
+#scene-view .swatch.column { background: #8d887f; }
+#scene-view .swatch.core { background: #cfc8be; }
+#scene-view .swatch.ramp { background: #8d8680; }
+#scene-view .swatch.entrance { background: #1f6b62; }
+#scene-view .swatch.exit { background: #b5522a; }
+
+/* 생성 중 표시 */
+.busy { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(240, 236, 228, 0.55); backdrop-filter: blur(1px); cursor: progress; }
+.busy[hidden] { display: none; }
+.busy-box { display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-radius: 14px; background: #fffdf8; box-shadow: 0 6px 24px rgba(0,0,0,0.12); font-size: 15px; color: #222; }
+.spinner { width: 20px; height: 20px; border-radius: 50%; border: 3px solid #d9d2c3; border-top-color: #2b3a2f; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+body.is-busy { cursor: progress; }
+
+/* 평면 단계 문제 표시 */
+.issue-box { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.issue-box ul { margin: 4px 0 0; padding-left: 18px; }
+.issue-box.error { background: #fbe9e6; color: #8a2a1c; border: 1px solid #efc2b9; }
+.issue-box.warn { background: #fdf4dc; color: #6b5310; border: 1px solid #ecd9a0; }
+
+/* 평면 위 알림(오른쪽 아래): 3D 불가 원인 / 주의 */
+.plan-alert { position: absolute; right: 16px; bottom: 16px; max-width: 420px; display: grid; gap: 8px; z-index: 5; pointer-events: none; }
+.plan-alert[hidden] { display: none; }
+.plan-alert .issue-box { margin: 0; box-shadow: 0 4px 16px rgba(0,0,0,0.10); }
+
+/* 공동주택 세대 구간: 세대수 · 전용면적 · 삭제(×) */
+.band-row { display: grid; grid-template-columns: 1fr 1fr 32px; gap: 8px; align-items: end; }
+.band-row .band-del { min-width: 28px; padding: 6px 0; margin-bottom: 4px; }
+input[readonly] { background: #efebe3; color: #555; cursor: default; }
