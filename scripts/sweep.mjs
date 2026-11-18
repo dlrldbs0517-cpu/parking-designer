@@ -1,6 +1,6 @@
 // 여러 조건(크기 5 × 도로 변 4 × 램프 위치 3 × 층고 2 = 120가지)을 돌려 겹침·확장형 부족·통과안 없음을 찾는다.
 // 실행: node scripts/sweep.mjs  (약 1~2분)
-import { generateVariants, defaultCore, minStraightRampLength, rampTransitions } from "../src/layout.js?v=221";
+import { generateVariants, defaultCore, minStraightRampLength, rampTransitions } from "../src/layout.js?v=222";
 const ov = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
 let cases = 0, noValid = 0, bad = 0; const t0 = Date.now(); const rows = [];
 for (const [w, d] of [[40, 36], [48, 42], [60, 50], [73.9, 57.7], [36, 60]]) for (const edge of ["s", "n", "w", "e"]) for (const pos of ["start", "mid", "end"]) for (const fh of [3.2, 3.8]) {

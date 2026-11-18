@@ -1,9 +1,10 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=221";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=221";
-import { drawThumb, mountPlan } from "./plan.js?v=221";
-import { stallRuleTargets } from "./stallTypes.js?v=221";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=221";
-import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=221";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=222";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=222";
+import { drawThumb, mountPlan } from "./plan.js?v=222";
+import { stallRuleTargets } from "./stallTypes.js?v=222";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=222";
+import { lookupZoning, regionFromAddress } from "./zoning.js?v=222";
+import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=222";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -316,7 +317,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=221")
+    sceneMount = import("./scene.js?v=222")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -677,6 +678,51 @@ function buildDemandForm() {
     $("suggest-note").textContent = `→ ${rec.width}×${rec.depth}m (${demand.legalStalls}대 × ${demand.areaPerStall}㎡ ÷ ${demand.plannedFloors}층)`;
     emit();
   });
+  // 주소 → 용도지역 조회(브이월드). 결과를 보여 주고, 목록에 있는 용도지역·지역이면 선택칸도 맞춘다.
+  const squash = (s) => String(s || "").replace(/\s+/g, "");
+  const lookup = async () => {
+    const address = $("site-address").value.trim();
+    const box = $("zone-result");
+    if (!address) { box.hidden = false; box.className = "zone-result warn"; box.textContent = "주소를 넣어 주세요."; return; }
+    box.hidden = false;
+    box.className = "zone-result";
+    box.textContent = "조회 중…";
+    $("zone-lookup").disabled = true;
+    try {
+      const r = await lookupZoning(address);
+      state.demand.siteAddress = r.address;
+      state.demand.siteZones = r.zones;
+      if (r.notFound) {
+        box.className = "zone-result warn";
+        box.textContent = "주소를 찾지 못했습니다. 도로명(예: 공릉로 232) 또는 지번(예: 공릉동 172)으로 다시 넣어 보세요.";
+        return;
+      }
+      if (!r.zones.length) {
+        box.className = "zone-result warn";
+        box.textContent = `${r.address} — 용도지역 자료가 없습니다.`;
+        return;
+      }
+      const lines = r.zones.map((z) => {
+        const l = r.limits[z];
+        return `<li><b>${z}</b>${l ? ` · 건폐율 ${l.bcr}% 이하 · 용적률 ${l.far}% 이하` : ""}</li>`;
+      }).join("");
+      const multi = r.zones.length > 1 ? "<p>필지가 둘 이상의 용도지역에 걸쳐 있을 수 있습니다.</p>" : "";
+      box.innerHTML = `<p>${r.address}</p><ul>${lines}</ul>${multi}<p class="note">건폐율·용적률은 국토계획법 시행령 상한입니다. 실제 값은 시·군 조례로 더 낮을 수 있습니다.</p>`;
+      // 선택칸 맞추기
+      const hit = Object.entries(zoneFactors).find(([, z]) => r.zones.some((name) => squash(name) === squash(z.label)));
+      if (hit) $("zone").value = hit[0];
+      const region = regionFromAddress(r.address);
+      if (region) $("region").value = region;
+      read();
+    } catch (e) {
+      box.className = "zone-result warn";
+      box.textContent = `조회 실패: ${e && e.message ? e.message : e}. 등록된 사이트 주소(github.io)에서만 동작합니다.`;
+    } finally {
+      $("zone-lookup").disabled = false;
+    }
+  };
+  $("zone-lookup").addEventListener("click", lookup);
+  $("site-address").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); lookup(); } });
   ["zone", "region", "project-name", "ordinance", "area-per-stall", "planned-floors"].forEach((id) => {
     $(id).addEventListener("input", read);
     $(id).addEventListener("change", read);

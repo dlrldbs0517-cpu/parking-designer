@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=221" />
+    <link rel="stylesheet" href="styles.css?v=222" />
     <script type="importmap">
       {
         "imports": {
@@ -35,6 +35,14 @@
           프로젝트명
           <input id="project-name" type="text" value="주차장 개략 설계" />
         </label>
+        <label>
+          대지 주소 <span class="info" tabindex="0" title="도로명 또는 지번 주소. 브이월드(국토교통부) 자료로 용도지역과 건폐율·용적률 상한을 찾아 줍니다.">ⓘ</span>
+          <span class="addr-row">
+            <input id="site-address" type="text" placeholder="예: 서울 노원구 공릉로 232" />
+            <button type="button" id="zone-lookup" class="ghost tiny">용도지역 조회</button>
+          </span>
+        </label>
+        <div id="zone-result" class="zone-result" hidden></div>
         <div class="split">
           <label>
             용도지역
@@ -403,7 +411,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r221</span>
+        <br /><span class="hint">버전 2026-11-10 · r222</span>
       </p>
     </aside>
 
@@ -441,7 +449,7 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=221"></script>
+    <script type="module" src="src/main.js?v=222"></script>
       <div id="busy" class="busy" hidden role="status" aria-live="polite">
       <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
     </div>
