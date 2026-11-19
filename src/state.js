@@ -1,4 +1,4 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=226";
+import { calculateDemand, emptyDemand } from "./demand.js?v=240";
 import {
   basementCount,
   clampCore,
@@ -15,7 +15,7 @@ import {
   referenceCase,
   searchPlacement,
   snapCore,
-} from "./layout.js?v=226";
+} from "./layout.js?v=240";
 
 export const state = {
   step: 1,

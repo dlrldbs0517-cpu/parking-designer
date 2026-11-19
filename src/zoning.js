@@ -1,6 +1,6 @@
 // 주소 → 용도지역 조회 (브이월드 오픈API)
 // 1) 지오코더: 주소 → 좌표(EPSG:4326)  2) 2D 데이터: 좌표가 속한 용도지역(LT_C_UQ111~114)
-// 키는 등록한 서비스 URL(https://dlrldbs0517-cpu.github.io)에서만 동작한다.
+// 키는 등록한 서비스 URL(https://dlrldbs0517-cpu.github.io)로 발급. localhost에서도 같은 domain 값을 보내 조회된다.
 
 const VWORLD_KEY = "A4ECF279-47FE-4E55-B8B2-4DFC233EABA2";
 const API = "https://api.vworld.kr/req";
@@ -53,6 +53,7 @@ function jsonp(url, timeout = 8000) {
     const timer = setTimeout(() => done(reject, new Error("timeout")), timeout);
     window[name] = (data) => done(resolve, data);
     script.onerror = () => done(reject, new Error("load"));
+    script.referrerPolicy = "no-referrer";
     script.src = `${url}&callback=${name}`;
     document.head.appendChild(script);
   });
@@ -67,8 +68,10 @@ async function call(url) {
   }
 }
 
+// 키에 등록한 서비스 URL. 브이월드는 domain 값으로 키를 확인하므로, 내 컴퓨터(localhost)에서 실행해도 이 값을 보낸다.
+const SERVICE_URL = "https://dlrldbs0517-cpu.github.io";
 function domain() {
-  return typeof location !== "undefined" ? location.origin : "";
+  return SERVICE_URL;
 }
 
 export async function geocode(address) {
@@ -162,17 +165,32 @@ export async function parcelAt(x, y) {
   };
 }
 
-// 주변(반경 radius m 상자)의 필지 경계와 건물(높이·층수)
-export async function surroundings(x, y, radius = 200) {
+// 영역(경위도 상자 {w, s, e, n}) 안의 필지 경계와 건물(높이·층수). 레이어마다 한 번에 1,000개까지.
+export const MAX_FEATURES = 1000;
+export async function surroundingsBox(b) {
+  const box = `BOX(${b.w},${b.s},${b.e},${b.n})`;
+  const [parcels, buildings, roads] = await Promise.all([
+    getFeatures("LP_PA_CBND_BUBUN", box, MAX_FEATURES, true).catch(() => []),
+    getFeatures("LT_C_BLDGINFO", box, MAX_FEATURES, true),
+    getFeatures("LT_L_SPRD", box, MAX_FEATURES, true).catch(() => []),
+  ]);
+  return { bbox: b, center: { x: (b.w + b.e) / 2, y: (b.s + b.n) / 2 }, parcels, buildings, roads };
+}
+
+// 점 중심 반경 radius m 상자
+export function boxAround(x, y, radius = 200) {
   const dLat = radius / 110540;
   const dLon = radius / (111320 * Math.cos((y * Math.PI) / 180));
-  const box = `BOX(${x - dLon},${y - dLat},${x + dLon},${y + dLat})`;
-  const [parcels, buildings] = await Promise.all([
-    getFeatures("LP_PA_CBND_BUBUN", box, 1000, true).catch(() => []),
-    getFeatures("LT_C_BLDGINFO", box, 1000, true),
-  ]);
-  return { center: { x, y }, radius, parcels, buildings };
+  return { w: x - dLon, s: y - dLat, e: x + dLon, n: y + dLat };
 }
+
+// 상자 가로·세로 길이(m)
+export function boxSize(b) {
+  const cy = (b.s + b.n) / 2;
+  return { w: (b.e - b.w) * 111320 * Math.cos((cy * Math.PI) / 180), d: (b.n - b.s) * 110540 };
+}
+
+export const WMTS = (layer) => `https://api.vworld.kr/req/wmts/1.0.0/${VWORLD_KEY}/${layer}/{z}/{y}/{x}.${layer === "Satellite" ? "jpeg" : "png"}`;
 
 // 경위도 → 대지 중심 기준 m 좌표(동쪽 +x, 북쪽 +y)
 export function localizer(cx, cy) {
@@ -189,9 +207,156 @@ export function outerRings(geometry) {
   return [];
 }
 
+// 높이 자료가 없을 때 쓰는 층고 어림값(우리가 정한 값, 법 기준 아님). 건축물 주용도 코드(usability) 앞 두 자리로 나눈다.
+// 01 단독·02 공동주택 → 3.0m / 03·04 근린생활·05 문화집회·07 판매·09 의료·10 교육연구·14 업무·15 숙박 → 4.0m / 그 밖 3.3m
+export function storyHeight(props) {
+  const use = String((props && props.usability) || "").padStart(5, "0").slice(0, 2);
+  if (use === "01" || use === "02") return 3.0;
+  if (["03", "04", "05", "07", "09", "10", "14", "15"].includes(use)) return 4.0;
+  return 3.3;
+}
+
 export function buildingHeight(props) {
   const h = Number(props && props.height);
   if (h > 0.5) return h;
   const f = Number(props && props.grnd_flr);
-  return f > 0 ? f * 3.3 : 3.3;
+  return (f > 0 ? f : 1) * storyHeight(props);
+}
+
+export function heightEstimated(props) {
+  return !(Number(props && props.height) > 0.5);
+}
+
+// 지적도 지번 끝 글자가 지목. "564도" → 도로
+export function isRoadParcel(props) {
+  return /도$/.test(String((props && props.jibun) || "").trim());
+}
+
+// 지목은 '도'인데 실제로 건물이 서 있는 필지(오래된 동네에 흔함)는 도로로 보지 않는다.
+// 큰 도로 필지에도 지하철 출입구·버스정류장 같은 작은 건물이 있으므로, 건물 바닥이 필지 면적의 25% 이상일 때만 뺀다.
+function ringArea(ring) {
+  const cy = ring[0][1];
+  const kx = 111320 * Math.cos((cy * Math.PI) / 180);
+  const ky = 110540;
+  let a = 0;
+  for (let i = 0; i < ring.length - 1; i += 1) a += ring[i][0] * kx * ring[i + 1][1] * ky - ring[i + 1][0] * kx * ring[i][1] * ky;
+  return Math.abs(a) / 2;
+}
+export function realRoads(roadFeats, buildingFeats) {
+  const blds = buildingFeats.flatMap((f) => outerRings(f.geometry).map((r) => {
+    const n = r.length;
+    return { c: [r.reduce((a, p) => a + p[0], 0) / n, r.reduce((a, p) => a + p[1], 0) / n], area: ringArea(r) };
+  }));
+  return roadFeats.filter((f) => {
+    const rings = outerRings(f.geometry);
+    const area = rings.reduce((a, r) => a + ringArea(r), 0);
+    if (!(area > 0)) return true;
+    const covered = blds.filter((b) => rings.some((ring) => inRingLL(b.c, ring))).reduce((a, b) => a + b.area, 0);
+    return covered / area < 0.25;
+  });
+}
+function inRingLL(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// GeoJSON 선(LineString/MultiLineString) → 선 목록
+export function lineParts(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "LineString") return [geometry.coordinates];
+  if (geometry.type === "MultiLineString") return geometry.coordinates;
+  return [];
+}
+
+function inRing(pt, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function segDist(p, a, b) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+const DIR_NAME = { n: "북측", e: "동측", s: "남측", w: "서측" };
+
+// 대지 필지의 어느 변이 도로(지목 '도' 필지)에 붙어 있는지. 변을 3m 간격으로 짚어 바깥 1.5m 지점이 도로 필지 안이면 접도.
+export async function roadAccess(site) {
+  if (!site || !site.geometry) return null;
+  const rings = outerRings(site.geometry);
+  if (!rings.length) return null;
+  const all = rings.flat();
+  const lons = all.map((p) => p[0]);
+  const lats = all.map((p) => p[1]);
+  const pad = 0.0004;   // 약 40m
+  const box = { w: Math.min(...lons) - pad, e: Math.max(...lons) + pad, s: Math.min(...lats) - pad, n: Math.max(...lats) + pad };
+  const bbox = `BOX(${box.w},${box.s},${box.e},${box.n})`;
+  const [parcels, lines, blds] = await Promise.all([
+    getFeatures("LP_PA_CBND_BUBUN", bbox, MAX_FEATURES, true),
+    getFeatures("LT_L_SPRD", bbox, MAX_FEATURES, true).catch(() => []),
+    getFeatures("LT_C_BLDGINFO", bbox, MAX_FEATURES, true).catch(() => []),
+  ]);
+  const cx = (box.w + box.e) / 2;
+  const cy = (box.s + box.n) / 2;
+  const L = localizer(cx, cy);
+  // 도로 = 지목 '도' 필지(건물이 들어찬 것 제외)
+  const roadRings = realRoads(parcels.filter((f) => isRoadParcel(f.properties)), blds)
+    .flatMap((f) => outerRings(f.geometry).map((r) => r.map(L)));
+  const roadLines = lines.flatMap((f) => lineParts(f.geometry).map((pts) => ({ name: (f.properties && f.properties.rn) || "", pts: pts.map(L) })));
+  const sides = {};
+  const edges = [];
+  rings.forEach((ringLL) => {
+    const ring = ringLL.map(L);
+    let area = 0;
+    for (let i = 0; i < ring.length - 1; i += 1) area += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+    const ccw = area > 0;
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const a = ring[i];
+      const b = ring[i + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 0.5) continue;
+      const ux = (b[0] - a[0]) / len;
+      const uy = (b[1] - a[1]) / len;
+      const nx = ccw ? uy : -uy;   // 바깥쪽 법선
+      const ny = ccw ? -ux : ux;
+      const steps = Math.max(1, Math.round(len / 3));
+      let hit = 0;
+      for (let k = 0; k < steps; k += 1) {
+        const t = (k + 0.5) / steps;
+        const pt = [a[0] + (b[0] - a[0]) * t + nx * 1.5, a[1] + (b[1] - a[1]) * t + ny * 1.5];
+        if (roadRings.some((r) => inRing(pt, r))) hit += 1;
+      }
+      if (hit / steps < 0.5) continue;
+      const dir = Math.abs(nx) > Math.abs(ny) ? (nx > 0 ? "e" : "w") : (ny > 0 ? "n" : "s");
+      // 가까운 도로 중심선의 이름
+      const mid = [(a[0] + b[0]) / 2 + nx * 6, (a[1] + b[1]) / 2 + ny * 6];
+      let name = "";
+      let best = 40;
+      roadLines.forEach((l) => {
+        for (let j = 0; j < l.pts.length - 1; j += 1) {
+          const d = segDist(mid, l.pts[j], l.pts[j + 1]);
+          if (d < best && l.name) { best = d; name = l.name; }
+        }
+      });
+      const sd = sides[dir] || (sides[dir] = { dir, label: DIR_NAME[dir], len: 0, names: new Set() });
+      sd.len += len;
+      if (name) sd.names.add(name);
+      // 원래 경위도 좌표로 보관(지도·2D에서 다시 그림)
+      edges.push({ dir, a: ringLL[i], b: ringLL[i + 1] });
+    }
+  });
+  const list = Object.values(sides).map((sd) => ({ ...sd, len: Math.round(sd.len), names: [...sd.names] })).sort((p, q) => q.len - p.len);
+  return { sides: list, edges, main: list[0] ? list[0].dir : null };
 }

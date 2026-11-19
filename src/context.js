@@ -1,24 +1,82 @@
-// 주변 매스 보기: 주소 조회 뒤 대지 주변 필지·건물을 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다.
+// 주변 매스 보기: 주소 조회 뒤 오른쪽에 지도를 띄우고, 드래그로 고른 영역의 필지·건물을
+// 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다. 지도는 Leaflet(전역 L) + 브이월드 WMTS 타일.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { buildingHeight, localizer, outerRings, surroundings } from "./zoning.js?v=226";
+import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=240";
 
 const $ = (id) => document.getElementById(id);
-let cache = null;      // { key, data, site }
-let three = null;      // { renderer, controls, frame }
+const MAX_SIDE = 1000;   // 영역 한 변 최대(m). 브이월드가 레이어당 1,000개까지만 준다.
 
+let ctx = null;        // { point, site, title, bbox }
+let cache = null;      // { key, data }
+let three = null;      // { renderer, controls, frame }
+let map = null;        // Leaflet 지도
+let rect = null;       // 선택 영역 사각형
+let marker = null;
+
+// ── 데이터 → 로컬 m 좌표 ──
 function prepare(data, site) {
   const toLocal = localizer(data.center.x, data.center.y);
   const ring = (r) => r.map(toLocal);
-  const parcels = data.parcels.flatMap((f) => outerRings(f.geometry).map(ring));
+  const roadFeats = realRoads(data.parcels.filter((f) => isRoadParcel(f.properties)), data.buildings);
+  const parcels = data.parcels.filter((f) => !roadFeats.includes(f)).flatMap((f) => outerRings(f.geometry).map(ring));
+  const roadParcels = roadFeats.flatMap((f) => outerRings(f.geometry).map(ring));
+  const roadLines = (data.roads || []).flatMap((f) => lineParts(f.geometry).map((pts) => ({ name: (f.properties && f.properties.rn) || "", pts: pts.map(toLocal) })));
+  const accessEdges = ((ctx && ctx.access && ctx.access.edges) || []).map((e) => [toLocal(e.a), toLocal(e.b)]);
   const buildings = data.buildings.flatMap((f) => {
     const p = f.properties || {};
     const h = buildingHeight(p);
     const name = [p.bld_nm, p.dong_nm].filter(Boolean).join(" ");
-    return outerRings(f.geometry).map((r) => ({ ring: ring(r), h, name, floors: p.grnd_flr }));
+    const est = heightEstimated(p) ? ` (층수×${storyHeight(p)}m 추정)` : "";
+    return outerRings(f.geometry).map((r) => ({ ring: ring(r), h, name, floors: p.grnd_flr, est }));
   });
   const siteRings = site && site.geometry ? outerRings(site.geometry).map(ring) : [];
-  return { parcels, buildings, siteRings, radius: data.radius };
+  const size = boxSize(data.bbox);
+  const hx = size.w / 2;
+  const hy = size.d / 2;
+  // 영역 경계에 걸친 건물은 잘라 내지 않고, 중심이 영역 안에 있는 건물만 통째로 보여 준다.
+  const inside = (r) => {
+    const cx = r.reduce((a, p) => a + p[0], 0) / r.length;
+    const cy = r.reduce((a, p) => a + p[1], 0) / r.length;
+    return Math.abs(cx) <= hx && Math.abs(cy) <= hy;
+  };
+  return { parcels, roadParcels, roadLines, accessEdges, buildings: buildings.filter((b) => inside(b.ring)), siteRings, hx, hy, bbox: data.bbox, toLocal, center: data.center };
+}
+
+// 2D 배경: 브이월드 일반지도 타일을 영역에 깔아 실제 도로 모양을 보여 준다(지적도 도로 필지는 끊기거나 틀린 곳이 많음).
+function tileBackground(model, view, pxWidth) {
+  if (!model.bbox) return "";
+  const bb = model.bbox;
+  const { x: cx, y: cy } = model.center;
+  const kx = 111320 * Math.cos((cy * Math.PI) / 180);
+  const ky = 110540;
+  // 보이는 범위(svg 좌표, y 아래로 +) ∩ 영역 → 경위도
+  const vx0 = Math.max(-model.hx, view.x); const vx1 = Math.min(model.hx, view.x + view.w);
+  const vy0 = Math.max(-model.hy, view.y); const vy1 = Math.min(model.hy, view.y + view.h);
+  if (vx1 <= vx0 || vy1 <= vy0) return "";
+  const b = { w: Math.max(bb.w, cx + vx0 / kx), e: Math.min(bb.e, cx + vx1 / kx), n: Math.min(bb.n, cy - vy0 / ky), s: Math.max(bb.s, cy - vy1 / ky) };
+  const toLocal = model.toLocal;
+  const mpp = view.w / Math.max(300, pxWidth || 1100);   // 화면 1px당 m
+  const z = Math.max(12, Math.min(19, Math.round(Math.log2((40075016 * Math.cos((cy * Math.PI) / 180)) / (256 * mpp)))));
+  const n = 2 ** z;
+  const lon2x = (lon) => Math.floor(((lon + 180) / 360) * n);
+  const lat2y = (lat) => Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+  const x2lon = (x) => (x / n) * 360 - 180;
+  const y2lat = (y) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+  const x0 = lon2x(b.w); const x1 = lon2x(b.e);
+  const y0 = lat2y(b.n); const y1 = lat2y(b.s);
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 150) return "";
+  const url = WMTS("Base");
+  const out = [];
+  for (let x = x0; x <= x1; x += 1) {
+    for (let y = y0; y <= y1; y += 1) {
+      const [lx, ty] = toLocal([x2lon(x), y2lat(y)]);
+      const [rx, by] = toLocal([x2lon(x + 1), y2lat(y + 1)]);
+      const href = url.replace("{z}", z).replace("{y}", y).replace("{x}", x);
+      out.push(`<image href="${href}" x="${lx.toFixed(2)}" y="${(-ty).toFixed(2)}" width="${(rx - lx).toFixed(2)}" height="${(ty - by).toFixed(2)}" preserveAspectRatio="none"/>`);
+    }
+  }
+  return out.join("");
 }
 
 function pathOf(ring) {
@@ -26,23 +84,167 @@ function pathOf(ring) {
 }
 
 function draw2d(model) {
-  const R = model.radius;
+  const { hx, hy } = model;
   const maxH = Math.max(10, ...model.buildings.map((b) => b.h));
   const parcels = model.parcels.map((r) => `<path d="${pathOf(r)}" class="cx-parcel"/>`).join("");
   const site = model.siteRings.map((r) => `<path d="${pathOf(r)}" class="cx-site"/>`).join("");
+  const roads = model.roadParcels.map((r) => `<path d="${pathOf(r)}" class="cx-road"/>`).join("");
+  // 지적상 도로 필지가 끊긴 곳(교차로·다른 지목)을 도로 중심선으로 잇는다. 이름이 '…길'이면 6m, 그 밖(…로)은 12m 폭으로 칠함
+  const lineD = (pts) => pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${(-y).toFixed(1)}`).join("");
+  const centers = model.roadLines.map((l) => `<path d="${lineD(l.pts)}" class="cx-roadline" style="stroke-width:${/길$/.test(l.name) ? 6 : 12}"/>`).join("");
+
+  // 도로 이름: 이름마다 가장 긴 직선 구간 가운데 한 번만, 긴 도로부터, 서로 겹치면 생략
+  const span0 = Math.max(model.hx, model.hy);
+  const fz = span0 / 50;
+  const byName = new Map();
+  model.roadLines.forEach((l) => {
+    if (!l.name) return;
+    for (let i = 0; i < l.pts.length - 1; i += 1) {
+      const a = l.pts[i]; const b = l.pts[i + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const mx = (a[0] + b[0]) / 2; const my = (a[1] + b[1]) / 2;
+      if (Math.abs(mx) > model.hx * 0.95 || Math.abs(my) > model.hy * 0.95) continue;
+      const cur = byName.get(l.name);
+      if (!cur || len > cur.len) byName.set(l.name, { name: l.name, a, b, len, mx, my });
+    }
+  });
+  const placed = [];
+  const names = [...byName.values()]
+    .filter((c) => c.len >= c.name.length * fz * 0.7)
+    .sort((p, q) => q.len - p.len)
+    .filter((c) => {
+      const w = c.name.length * fz;
+      if (placed.some((p) => Math.hypot(p.mx - c.mx, p.my - c.my) < (p.w + w) / 2 + fz)) return false;
+      placed.push({ mx: c.mx, my: c.my, w });
+      return placed.length <= 30;
+    })
+    .map((c) => {
+      let ang = (Math.atan2(-(c.b[1] - c.a[1]), c.b[0] - c.a[0]) * 180) / Math.PI;
+      if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+      return `<text class="cx-roadname" style="font-size:${fz.toFixed(2)}px;stroke-width:${(fz / 4).toFixed(2)}px" transform="translate(${c.mx.toFixed(1)} ${(-c.my).toFixed(1)}) rotate(${ang.toFixed(1)})" text-anchor="middle" dy="${(fz / 3).toFixed(2)}">${c.name}</text>`;
+    }).join("");
   const builds = model.buildings.map((b) => {
-    const t = 0.25 + 0.6 * Math.min(1, b.h / maxH);
-    const tip = `${b.name || "건물"} · ${b.floors ? `지상 ${b.floors}층 · ` : ""}높이 ${b.h.toFixed(1)}m`;
-    return `<path d="${pathOf(b.ring)}" class="cx-bldg" style="fill-opacity:${t.toFixed(2)}"><title>${tip}</title></path>`;
+    const t = Math.min(1, b.h / maxH);
+    const mix = (lo, hi) => Math.round(lo + (hi - lo) * t);
+    const fill = `rgb(${mix(214, 95)},${mix(209, 90)},${mix(199, 80)})`;
+    const tip = `${b.name || "건물"} · ${b.floors ? `지상 ${b.floors}층 · ` : ""}높이 ${b.h.toFixed(1)}m${b.est}`;
+    return `<path d="${pathOf(b.ring)}" class="cx-bldg" style="fill:${fill}"><title>${tip}</title></path>`;
   }).join("");
-  const bar = 50;
   $("context-2d").innerHTML = `
-    <svg viewBox="${-R} ${-R} ${2 * R} ${2 * R}" class="cx-svg">
-      <rect x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" class="cx-bg"/>
-      ${parcels}${site}${builds}
-      <g class="cx-north" transform="translate(${R - 18} ${-R + 22})"><path d="M0 -12 L6 6 L0 2 L-6 6 Z"/><text y="20" text-anchor="middle">N</text></g>
-      <g class="cx-bar" transform="translate(${-R + 12} ${R - 14})"><rect width="${bar}" height="3"/><text y="-4">${bar}m</text></g>
-    </svg>`;
+    <svg class="cx-svg" preserveAspectRatio="xMidYMid meet">
+      <defs><clipPath id="cx-clip"><rect x="${-hx}" y="${-hy}" width="${2 * hx}" height="${2 * hy}"/></clipPath></defs>
+      <rect x="${-hx}" y="${-hy}" width="${2 * hx}" height="${2 * hy}" class="cx-bg"/>
+      <g clip-path="url(#cx-clip)"><g class="cx-tiles"></g>${parcels}${site}</g>${builds}
+    </svg>
+    <div class="cx-north2">▲<br>N</div>
+    <div class="cx-bar2"><span></span><i></i></div>`;
+  bind2dView(model);
+}
+
+// 2D 확대·이동: 휠 = 확대/축소(마우스 위치 기준), 드래그 = 이동, 더블클릭 = 처음 화면
+function bind2dView(model) {
+  const box = $("context-2d");
+  const svg = box.querySelector("svg");
+  const full = { x: -model.hx, y: -model.hy, w: 2 * model.hx, h: 2 * model.hy };
+  let view = { ...full };
+  let tileTimer = 0;
+  const apply = () => {
+    svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+    // 축척 막대: 화면 px당 m
+    const r = svg.getBoundingClientRect();
+    const scale = Math.min(r.width / view.w, r.height / view.h) || 1;   // px per m
+    const target = 120 / scale;
+    const nice = [1, 2, 5, 10, 20, 50, 100, 200, 500].reduce((best, v) => (v <= target ? v : best), 1);
+    const bar = box.querySelector(".cx-bar2");
+    bar.querySelector("i").style.width = `${nice * scale}px`;
+    bar.querySelector("span").textContent = `${nice}m`;
+    clearTimeout(tileTimer);
+    tileTimer = setTimeout(() => {
+      const g = svg.querySelector(".cx-tiles");
+      if (g) g.innerHTML = tileBackground(model, view, r.width);
+    }, 150);
+  };
+  const toSvg = (e) => {
+    const r = svg.getBoundingClientRect();
+    const scale = Math.min(r.width / view.w, r.height / view.h);
+    const ox = (r.width - view.w * scale) / 2;
+    const oy = (r.height - view.h * scale) / 2;
+    return [view.x + (e.clientX - r.left - ox) / scale, view.y + (e.clientY - r.top - oy) / scale, scale];
+  };
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const [px, py] = toSvg(e);
+    const f = e.deltaY > 0 ? 1.2 : 1 / 1.2;
+    const w = Math.min(full.w * 1.5, Math.max(20, view.w * f));
+    const k = w / view.w;
+    view = { x: px - (px - view.x) * k, y: py - (py - view.y) * k, w, h: view.h * k };
+    apply();
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("contextmenu", (e) => e.preventDefault());
+  svg.addEventListener("mousedown", (e) => {
+    const [, , scale] = toSvg(e);
+    drag = { x: e.clientX, y: e.clientY, scale };
+    svg.classList.add("panning");
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    view = { ...view, x: view.x - (e.clientX - drag.x) / drag.scale, y: view.y - (e.clientY - drag.y) / drag.scale };
+    drag.x = e.clientX; drag.y = e.clientY;
+    apply();
+  });
+  window.addEventListener("mouseup", () => { if (drag) { drag = null; svg.classList.remove("panning"); } });
+  svg.addEventListener("dblclick", () => { view = { ...full }; apply(); });
+  apply();
+}
+
+// 영역(model.bbox)을 덮는 지도 타일을 한 장의 캔버스로 붙여 3D 바닥 텍스처로 쓴다. 타일이 올 때마다 onUpdate.
+function groundTexture(model, onUpdate) {
+  const b = model.bbox;
+  if (!b) return null;
+  const cy = (b.s + b.n) / 2;
+  const W = 2 * model.hx;
+  const H = 2 * model.hy;
+  // 캔버스 긴 변 최대 4096px, 타일 수 최대 144장
+  let z = Math.max(12, Math.min(19, Math.round(Math.log2((40075016 * Math.cos((cy * Math.PI) / 180)) / (256 * (Math.max(W, H) / 3000))))));
+  const n0 = (zz) => 2 ** zz;
+  const lon2x = (lon, n) => Math.floor(((lon + 180) / 360) * n);
+  const lat2y = (lat, n) => Math.floor(((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * n);
+  while (z > 12) {
+    const n = n0(z);
+    if ((lon2x(b.e, n) - lon2x(b.w, n) + 1) * (lat2y(b.s, n) - lat2y(b.n, n) + 1) <= 144) break;
+    z -= 1;
+  }
+  const n = n0(z);
+  const x2lon = (x) => (x / n) * 360 - 180;
+  const y2lat = (y) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n))) * 180) / Math.PI;
+  const scale = Math.min(4096 / W, 4096 / H, 4);   // px per m
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(2, Math.round(W * scale));
+  canvas.height = Math.max(2, Math.round(H * scale));
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#e9e2d4";
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const toPx = ([lx, ly]) => [(lx + model.hx) * scale, (model.hy - ly) * scale];
+  const url = WMTS("Base");
+  for (let x = lon2x(b.w, n); x <= lon2x(b.e, n); x += 1) {
+    for (let y = lat2y(b.n, n); y <= lat2y(b.s, n); y += 1) {
+      const [px0, py0] = toPx(model.toLocal([x2lon(x), y2lat(y)]));
+      const [px1, py1] = toPx(model.toLocal([x2lon(x + 1), y2lat(y + 1)]));
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.referrerPolicy = "no-referrer";
+      img.onload = () => {
+        try { g.drawImage(img, px0, py0, px1 - px0, py1 - py0); onUpdate(); } catch (e) { /* 무시 */ }
+      };
+      img.src = url.replace("{z}", z).replace("{y}", y).replace("{x}", x);
+    }
+  }
+  return tex;
 }
 
 function stop3d() {
@@ -62,12 +264,14 @@ function draw3d(model) {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.setSize(w, h);
+  renderer.localClippingEnabled = true;
   box.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf3efe7);
-  const R = model.radius;
+  const { hx, hy } = model;
+  const R = Math.max(hx, hy);
   const camera = new THREE.PerspectiveCamera(40, w / h, 1, R * 20);
-  camera.position.set(R * 0.9, R * 1.1, R * 1.3);
+  camera.position.set(R * 1.3, R * 1.5, R * 1.8);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
   controls.maxPolarAngle = Math.PI / 2.05;
@@ -76,27 +280,33 @@ function draw3d(model) {
   sun.position.set(R, R * 2, R * 0.5);
   scene.add(sun);
 
-  // 바닥
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2 * R, 2 * R), new THREE.MeshLambertMaterial({ color: 0xe9e2d4 }));
+  // 영역 밖은 잘라 낸다(큰 필지가 바닥 밖으로 삐져나오지 않게)
+  const clip = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), hx), new THREE.Plane(new THREE.Vector3(1, 0, 0), hx),
+    new THREE.Plane(new THREE.Vector3(0, 0, -1), hy), new THREE.Plane(new THREE.Vector3(0, 0, 1), hy),
+  ];
+
+  // 바닥: 브이월드 일반지도를 텍스처로(지적도 도로 필지는 끊기거나 틀린 곳이 많아 쓰지 않음)
+  const groundMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const tex = groundTexture(model, () => { if (groundMat.map) groundMat.map.needsUpdate = true; });
+  if (tex) { groundMat.map = tex; } else groundMat.color.set(0xe9e2d4);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2 * hx, 2 * hy), groundMat);
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
   const shapeOf = (ring) => new THREE.Shape(ring.map(([x, y]) => new THREE.Vector2(x, y)));
-  const flat = (ring, color, lift) => {
-    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(ring)), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = lift;
-    return mesh;
-  };
-  // 필지 경계선
-  const lineMat = new THREE.LineBasicMaterial({ color: 0xb3a892 });
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xb3a892, clippingPlanes: clip });
   model.parcels.forEach((ring) => {
     const pts = ring.map(([x, y]) => new THREE.Vector3(x, 0.05, -y));
     scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
   });
-  // 대지
-  model.siteRings.forEach((ring) => scene.add(flat(ring, 0xe8a25c, 0.08)));
-  // 건물 매스
+  const siteMat = new THREE.MeshBasicMaterial({ color: 0xe8a25c, side: THREE.DoubleSide, clippingPlanes: clip });
+  model.siteRings.forEach((ring) => {
+    const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(ring)), siteMat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.08;
+    scene.add(mesh);
+  });
   const mat = new THREE.MeshLambertMaterial({ color: 0xc9c4ba });
   const edgeMat = new THREE.LineBasicMaterial({ color: 0x8a8578 });
   model.buildings.forEach((b) => {
@@ -118,32 +328,164 @@ function draw3d(model) {
   loop();
 }
 
-function setMode(mode, model) {
-  $("context-2d").hidden = mode !== "2d";
-  $("context-3d").hidden = mode !== "3d";
-  $("context-mode-2d").classList.toggle("on", mode === "2d");
-  $("context-mode-3d").classList.toggle("on", mode === "3d");
-  if (mode === "2d") { stop3d(); draw2d(model); } else draw3d(model);
+// ── 지도 ──
+const toBox = (bounds) => ({ w: bounds.getWest(), s: bounds.getSouth(), e: bounds.getEast(), n: bounds.getNorth() });
+const toBounds = (b) => [[b.s, b.w], [b.n, b.e]];
+
+function clampBox(b) {
+  const size = boxSize(b);
+  if (size.w <= MAX_SIDE && size.d <= MAX_SIDE) return { box: b, clamped: false };
+  const cx = (b.w + b.e) / 2;
+  const cy = (b.s + b.n) / 2;
+  const fx = Math.min(1, MAX_SIDE / size.w);
+  const fy = Math.min(1, MAX_SIDE / size.d);
+  const hw = ((b.e - b.w) / 2) * fx;
+  const hh = ((b.n - b.s) / 2) * fy;
+  return { box: { w: cx - hw, e: cx + hw, s: cy - hh, n: cy + hh }, clamped: true };
 }
 
-// point: {x, y} 경위도, site: parcelAt() 결과(없어도 됨), mode: "2d" | "3d"
-export async function openContext(point, site, mode = "2d", title = "") {
-  const panel = $("context-view");
-  $("context-title").textContent = title ? `주변 매스 · ${title}` : "주변 매스";
-  $("context-status").textContent = "주변 필지·건물을 불러오는 중…";
-  $("context-2d").innerHTML = "";
-  panel.hidden = false;
+function areaText(b, extra = "") {
+  const s = boxSize(b);
+  return `선택 영역 ${Math.round(s.w)} × ${Math.round(s.d)}m${extra}`;
+}
+
+function setRect(b) {
+  ctx.bbox = b;
+  if (rect) rect.setBounds(toBounds(b));
+  else rect = window.L.rectangle(toBounds(b), { color: "#c2701f", weight: 2, fillOpacity: 0.08, dashArray: "6 4" }).addTo(map);
+  $("context-area").textContent = areaText(b);
+}
+
+function finishRect(raw) {
+  const size = boxSize(raw);
+  if (size.w < 30 || size.d < 30) {
+    if (ctx.prevBox) setRect(ctx.prevBox);
+    $("context-area").textContent = "영역이 너무 작습니다. 다시 그려 주세요.";
+    return;
+  }
+  const { box, clamped } = clampBox(raw);
+  setRect(box);
+  if (clamped) $("context-area").textContent = areaText(box, ` (한 변 최대 ${MAX_SIDE}m로 줄임)`);
+  ctx.prevBox = box;
+  // 영역을 고르면 바로 2D로 넘어간다
+  setMode("2d");
+}
+
+// 왼쪽 드래그 = 영역 그리기, 오른쪽 드래그 = 지도 이동, 휠 = 확대·축소
+function ensureMap() {
+  const L = window.L;
+  if (!L) throw new Error("지도 라이브러리(Leaflet)를 불러오지 못했습니다");
+  if (map) return map;
+  map = L.map("context-map", { zoomControl: true, attributionControl: true, dragging: false, boxZoom: false, doubleClickZoom: false });
+  const opts = { maxZoom: 19, minZoom: 6, referrerPolicy: "no-referrer", attribution: "© 브이월드(국토교통부)" };
+  const base = L.tileLayer(WMTS("Base"), opts).addTo(map);
+  const sat = L.tileLayer(WMTS("Satellite"), opts);
+  L.control.layers({ "일반지도": base, "위성사진": sat }, null, { position: "topright" }).addTo(map);
+
+  const el = $("context-map");
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+  let pan = null;
+  let start = null;
+  el.addEventListener("mousedown", (e) => {
+    if (e.target.closest(".leaflet-control")) return;
+    if (e.button === 2) {
+      pan = { x: e.clientX, y: e.clientY };
+      el.classList.add("panning");
+      e.preventDefault();
+    } else if (e.button === 0) {
+      start = map.mouseEventToLatLng(e);
+      setRect({ w: start.lng, e: start.lng, s: start.lat, n: start.lat });
+      e.preventDefault();
+    }
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (pan) {
+      map.panBy([pan.x - e.clientX, pan.y - e.clientY], { animate: false });
+      pan = { x: e.clientX, y: e.clientY };
+    } else if (start) {
+      setRect(toBox(L.latLngBounds(start, map.mouseEventToLatLng(e))));
+    }
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (pan) { pan = null; el.classList.remove("panning"); }
+    if (start) {
+      const raw = toBox(L.latLngBounds(start, map.mouseEventToLatLng(e)));
+      start = null;
+      finishRect(raw);
+    }
+  });
+  return map;
+}
+
+let siteLayer = null;
+let accessLayer = null;
+function showMap() {
+  const m = ensureMap();
+  const L = window.L;
+  const p = ctx.point;
+  if (marker) marker.setLatLng([p.y, p.x]);
+  else marker = L.circleMarker([p.y, p.x], { radius: 6, color: "#7a3e0a", weight: 2, fillColor: "#e8a25c", fillOpacity: 1, interactive: false }).addTo(m);
+  // 조회한 필지 경계를 주황으로 + 이름표
+  if (siteLayer) { siteLayer.remove(); siteLayer = null; }
+  if (ctx.site && ctx.site.geometry) {
+    siteLayer = L.geoJSON(ctx.site.geometry, { style: { color: "#c2701f", weight: 3, fillColor: "#e8a25c", fillOpacity: 0.35 }, interactive: false }).addTo(m);
+  }
+  if (accessLayer) { accessLayer.remove(); accessLayer = null; }
+  marker.unbindTooltip();
+  marker.bindTooltip(`대지 · ${(ctx.site && ctx.site.address) || ctx.title || ""}`, { permanent: true, direction: "top", offset: [0, -8], className: "cx-tip" });
+  setTimeout(() => {
+    m.invalidateSize();
+    if (!ctx.viewSet) {
+      const fit = L.latLngBounds(toBounds(ctx.bbox));
+      if (siteLayer) {
+        const sb = siteLayer.getBounds();
+        // 필지가 아주 크면(캠퍼스 등) 영역 기준으로만 맞춘다
+        if (boxSize(toBox(sb)).w < 1500) fit.extend(sb);
+      }
+      m.fitBounds(fit, { padding: [40, 40] });
+      ctx.viewSet = true;
+    }
+  }, 0);
+  setRect(ctx.bbox);
+}
+
+// ── 화면 전환 ──
+async function setMode(mode) {
+  ["map", "2d", "3d"].forEach((k) => {
+    $(`context-${k}`).hidden = k !== mode;
+    $(`context-mode-${k}`).classList.toggle("on", k === mode);
+  });
+  $("context-area").hidden = mode !== "map";
+  if (mode !== "3d") stop3d();
+  if (mode === "map") {
+    $("context-status").textContent = "왼쪽 드래그 = 영역 선택 · 오른쪽 드래그 = 지도 이동 · 휠 = 확대/축소 → 2D·3D로 보기 (한 변 최대 1km)";
+    showMap();
+    return;
+  }
+  $("context-status").textContent = "선택 영역의 필지·건물을 불러오는 중…";
   try {
-    const key = `${point.x},${point.y}`;
-    if (!cache || cache.key !== key) cache = { key, data: await surroundings(point.x, point.y, 200) };
-    const model = prepare(cache.data, site);
-    $("context-status").textContent = `반경 약 200m · 필지 ${cache.data.parcels.length}개 · 건물 ${cache.data.buildings.length}동 (높이 자료가 없으면 지상층수 × 3.3m) · 출처: 브이월드`;
-    $("context-mode-2d").onclick = () => setMode("2d", model);
-    $("context-mode-3d").onclick = () => setMode("3d", model);
-    setMode(mode, model);
+    const b = ctx.bbox;
+    const key = [b.w, b.s, b.e, b.n].map((v) => v.toFixed(6)).join(",");
+    if (!cache || cache.key !== key) cache = { key, data: await surroundingsBox(b) };
+    const data = cache.data;
+    const model = prepare(data, ctx.site);
+    const size = boxSize(b);
+    const full = (data.buildings.length >= MAX_FEATURES || data.parcels.length >= MAX_FEATURES) ? ` · 자료가 ${MAX_FEATURES}개를 넘어 일부만 표시(영역을 줄여 보세요)` : "";
+    $("context-status").textContent = `영역 ${Math.round(size.w)} × ${Math.round(size.d)}m · 필지 ${data.parcels.length}개 · 건물 ${model.buildings.length}동${full} · 높이 자료가 없으면 지상층수 × 층고(주거 3.0m · 업무·상업·교육 4.0m · 그 밖 3.3m) · 출처: 브이월드`;
+    if (mode === "2d") draw2d(model); else draw3d(model);
   } catch (e) {
     $("context-status").textContent = `불러오기 실패: ${e && e.message ? e.message : e}`;
   }
+}
+
+// point: {x, y} 경위도, site: parcelAt() 결과(없어도 됨), mode: "map" | "2d" | "3d"
+export function openContext(point, site, mode = "map", title = "", access = null) {
+  const same = ctx && ctx.point.x === point.x && ctx.point.y === point.y;
+  if (!same) { ctx = { point, site, title, access, bbox: boxAround(point.x, point.y, 200), viewSet: false }; cache = null; }
+  else { ctx.site = site || ctx.site; ctx.access = access || ctx.access; }
+  $("context-title").textContent = title ? `주변 매스 · ${title}` : "주변 매스";
+  $("context-view").hidden = false;
+  setMode(mode);
 }
 
 export function closeContext() {
@@ -153,4 +495,7 @@ export function closeContext() {
 
 export function bindContextDialog() {
   $("context-close").addEventListener("click", closeContext);
+  $("context-mode-map").addEventListener("click", () => setMode("map"));
+  $("context-mode-2d").addEventListener("click", () => setMode("2d"));
+  $("context-mode-3d").addEventListener("click", () => setMode("3d"));
 }

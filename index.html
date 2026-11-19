@@ -1,11 +1,12 @@
 <!DOCTYPE html>
 <html lang="ko">
   <head>
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="data:," />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=226" />
+    <link rel="stylesheet" href="styles.css?v=240" />
     <script type="importmap">
       {
         "imports": {
@@ -14,6 +15,8 @@
         }
       }
     </script>
+      <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+    <script src="vendor/leaflet/leaflet.js"></script>
   </head>
   <body>
     <aside class="panel">
@@ -418,7 +421,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r226</span>
+        <br /><span class="hint">버전 2026-11-10 · r240</span>
       </p>
     </aside>
 
@@ -458,19 +461,22 @@
         <div class="cx-head">
           <h3 id="context-title">주변 매스</h3>
           <div class="cx-modes">
+            <span id="context-area" class="hint cx-area"></span>
+            <button type="button" id="context-mode-map" class="ghost tiny">지도</button>
             <button type="button" id="context-mode-2d" class="ghost tiny">2D</button>
             <button type="button" id="context-mode-3d" class="ghost tiny">3D</button>
             <button type="button" id="context-close" class="ghost tiny">닫기</button>
           </div>
         </div>
         <p id="context-status" class="hint"></p>
-        <div id="context-2d" class="cx-view"></div>
+        <div id="context-map" class="cx-view"></div>
+        <div id="context-2d" class="cx-view" hidden></div>
         <div id="context-3d" class="cx-view" hidden></div>
-        <p class="hint">주황 = 대지(조회한 필지) · 회색 = 주변 건물(진할수록 높음) · 2D에서 건물에 마우스를 올리면 이름·층수·높이 · 3D는 끌어서 회전, 휠로 확대</p>
+        <p class="hint">지도: 왼쪽 드래그 = 영역 선택 · 오른쪽 드래그 = 이동 · 주황 = 대지 · 2D 배경 = 브이월드 지도 · 회색 = 건물(진할수록 높음) · 2D: 휠 확대 · 드래그 이동 · 더블클릭 처음 화면 · 건물에 마우스를 올리면 이름·층수·높이 · 3D는 끌어서 회전, 휠로 확대</p>
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=226"></script>
+    <script type="module" src="src/main.js?v=240"></script>
       <div id="busy" class="busy" hidden role="status" aria-live="polite">
       <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
     </div>

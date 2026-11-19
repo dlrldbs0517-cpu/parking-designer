@@ -448,11 +448,30 @@ select:disabled { background: #efebe3; color: #333; opacity: 1; }
 .context-view > p { margin: 0; }
 .cx-svg { width: 100%; height: 100%; display: block; }
 .cx-bg { fill: #f8f5ef; }
-.cx-parcel { fill: none; stroke: #b3a892; stroke-width: 0.4; }
-.cx-site { fill: #e8a25c; fill-opacity: 0.45; stroke: #c2701f; stroke-width: 1; }
-.cx-bldg { fill: #5f5a50; stroke: #4a463e; stroke-width: 0.4; }
-.cx-bldg:hover { fill: #2b6cb0; }
+.cx-parcel { fill: none; stroke: #b3a892; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.cx-site { fill: #e8a25c; fill-opacity: 0.45; stroke: #c2701f; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.cx-bldg { stroke: #6f6a60; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.cx-bldg:hover { fill: #2b6cb0 !important; }
 .cx-north path { fill: #2b2620; }
-.cx-north text, .cx-bar text { font-size: 9px; fill: #2b2620; }
+.cx-north text, .cx-bar text { fill: #2b2620; }
 .cx-bar rect { fill: #2b2620; }
 .zone-result .cx-open { margin-top: 6px; display: flex; gap: 6px; align-items: center; }
+.cx-area { margin: 0 6px 0 0; align-self: center; }
+#context-map.drawing { cursor: crosshair; }
+#context-map .leaflet-container, #context-map { font: inherit; }
+#context-map { cursor: crosshair; }
+#context-map.panning { cursor: grabbing; }
+.cx-tip { font-weight: 600; color: #7a3e0a; }
+.cx-road { fill: #c9cfd4; stroke: #a7afb6; stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.cx-access { stroke: #d62d20; stroke-width: 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.cx-roadname { fill: #4b5560; font-weight: 600; paint-order: stroke; stroke: #f8f5ef; }
+.cx-roadline { fill: none; stroke: #c9cfd4; stroke-linecap: round; stroke-linejoin: round; }
+.cx-tiles { opacity: 0.85; }
+.cx-parcel { stroke-opacity: 0.6; }
+#context-2d { position: relative; }
+.cx-svg { cursor: grab; }
+.cx-svg.panning { cursor: grabbing; }
+.cx-north2 { position: absolute; top: 12px; right: 16px; text-align: center; font-weight: 700; color: #2b2620; line-height: 1; font-size: 18px; pointer-events: none; }
+.cx-bar2 { position: absolute; left: 16px; bottom: 14px; pointer-events: none; color: #2b2620; font-size: 12px; }
+.cx-bar2 span { display: block; margin-bottom: 2px; }
+.cx-bar2 i { display: block; height: 4px; background: #2b2620; }
