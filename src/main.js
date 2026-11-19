@@ -1,11 +1,11 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=225";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=225";
-import { drawThumb, mountPlan } from "./plan.js?v=225";
-import { stallRuleTargets } from "./stallTypes.js?v=225";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=225";
-import { lookupZoning, parcelAt, regionFromAddress } from "./zoning.js?v=225";
-import { bindContextDialog, openContext } from "./context.js?v=225";
-import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=225";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=226";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=226";
+import { drawThumb, mountPlan } from "./plan.js?v=226";
+import { stallRuleTargets } from "./stallTypes.js?v=226";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=226";
+import { lookupZoning, parcelAt, regionFromAddress } from "./zoning.js?v=226";
+import { bindContextDialog, closeContext, openContext } from "./context.js?v=226";
+import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=226";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -295,6 +295,8 @@ document.querySelectorAll("#steps li").forEach((item) => {
 
 mountPlan($("plan"));
 subscribe(render);
+// 주변 매스는 조건 단계에서만 오른쪽에 띄운다. 평면·결과로 넘어가면 닫는다.
+subscribe(() => { if (state.step !== 1 && !$("context-view").hidden) closeContext(); });
 render();
 
 let sceneMount = null;
@@ -318,7 +320,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=225")
+    sceneMount = import("./scene.js?v=226")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -730,6 +732,8 @@ function buildDemandForm() {
       box.innerHTML = `<p>${r.address}</p><ul>${lines}</ul>${multi}${areaLine}<p class="note">건폐율·용적률은 국토계획법 시행령 상한입니다. 실제 값은 시·군 조례로 더 낮을 수 있습니다.</p>`
         + `<p class="cx-open">주변 매스 보기 <button type="button" class="ghost tiny" data-cx="2d">2D</button> <button type="button" class="ghost tiny" data-cx="3d">3D</button></p>`;
       box.querySelectorAll("[data-cx]").forEach((b) => b.addEventListener("click", () => openContext(r.point, site, b.dataset.cx, r.address)));
+      // 조건 단계에서는 오른쪽이 비어 있으니 조회하자마자 주변 2D를 바로 띄운다.
+      openContext(r.point, site, "2d", r.address);
       // 선택칸 맞추기
       const hit = Object.entries(zoneFactors).find(([, z]) => r.zones.some((name) => squash(name) === squash(z.label)));
       if (hit) $("zone").value = hit[0];

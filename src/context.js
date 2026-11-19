@@ -1,7 +1,7 @@
 // 주변 매스 보기: 주소 조회 뒤 대지 주변 필지·건물을 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { buildingHeight, localizer, outerRings, surroundings } from "./zoning.js?v=225";
+import { buildingHeight, localizer, outerRings, surroundings } from "./zoning.js?v=226";
 
 const $ = (id) => document.getElementById(id);
 let cache = null;      // { key, data, site }
@@ -128,11 +128,11 @@ function setMode(mode, model) {
 
 // point: {x, y} 경위도, site: parcelAt() 결과(없어도 됨), mode: "2d" | "3d"
 export async function openContext(point, site, mode = "2d", title = "") {
-  const dialog = $("context-dialog");
+  const panel = $("context-view");
   $("context-title").textContent = title ? `주변 매스 · ${title}` : "주변 매스";
   $("context-status").textContent = "주변 필지·건물을 불러오는 중…";
   $("context-2d").innerHTML = "";
-  if (!dialog.open) dialog.showModal();
+  panel.hidden = false;
   try {
     const key = `${point.x},${point.y}`;
     if (!cache || cache.key !== key) cache = { key, data: await surroundings(point.x, point.y, 200) };
@@ -146,8 +146,11 @@ export async function openContext(point, site, mode = "2d", title = "") {
   }
 }
 
+export function closeContext() {
+  stop3d();
+  $("context-view").hidden = true;
+}
+
 export function bindContextDialog() {
-  const dialog = $("context-dialog");
-  $("context-close").addEventListener("click", () => dialog.close());
-  dialog.addEventListener("close", stop3d);
+  $("context-close").addEventListener("click", closeContext);
 }
