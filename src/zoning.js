@@ -125,3 +125,73 @@ export function regionFromAddress(address) {
   if (isGun) return "other";
   return null;
 }
+
+// ── 대지 필지·주변 매스 ──────────────────────────────────────────
+async function getFeatures(layer, geomFilter, size = 300, geometry = true) {
+  const url = `${API}/data?service=data&request=GetFeature&version=2.0&format=json&geometry=${geometry}&size=${size}`
+    + `&data=${layer}&geomFilter=${encodeURIComponent(geomFilter)}&key=${VWORLD_KEY}&domain=${encodeURIComponent(domain())}`;
+  const data = await call(url);
+  const r = data && data.response;
+  if (!r || r.status === "NOT_FOUND") return [];
+  if (r.status === "ERROR") throw new Error((r.error && r.error.text) || `${layer} 오류`);
+  return (r.result && r.result.featureCollection && r.result.featureCollection.features) || [];
+}
+
+// 좌표(경위도)가 속한 필지 + 토지특성(공부상 면적·지목)
+export async function parcelAt(x, y) {
+  const feats = await getFeatures("LP_PA_CBND_BUBUN", `POINT(${x} ${y})`, 5, true);
+  const f = feats[0];
+  if (!f) return null;
+  const pnu = f.properties && f.properties.pnu;
+  let land = null;
+  const year = new Date().getFullYear();
+  for (const y0 of [year, year - 1, year - 2]) {
+    try {
+      const url = `https://api.vworld.kr/ned/data/getLandCharacteristics?pnu=${pnu}&stdrYear=${y0}&format=json&numOfRows=1&pageNo=1&key=${VWORLD_KEY}&domain=${encodeURIComponent(domain())}`;
+      const data = await call(url);
+      const field = data && data.landCharacteristicss && data.landCharacteristicss.field;
+      if (field && field.length) { land = field[0]; break; }
+    } catch (e) { /* 다음 해 */ }
+  }
+  return {
+    pnu,
+    address: f.properties && f.properties.addr,
+    geometry: f.geometry,
+    area: land ? Number(land.lndpclAr) : null,
+    jimok: land ? land.lndcgrCodeNm : null,
+  };
+}
+
+// 주변(반경 radius m 상자)의 필지 경계와 건물(높이·층수)
+export async function surroundings(x, y, radius = 200) {
+  const dLat = radius / 110540;
+  const dLon = radius / (111320 * Math.cos((y * Math.PI) / 180));
+  const box = `BOX(${x - dLon},${y - dLat},${x + dLon},${y + dLat})`;
+  const [parcels, buildings] = await Promise.all([
+    getFeatures("LP_PA_CBND_BUBUN", box, 1000, true).catch(() => []),
+    getFeatures("LT_C_BLDGINFO", box, 1000, true),
+  ]);
+  return { center: { x, y }, radius, parcels, buildings };
+}
+
+// 경위도 → 대지 중심 기준 m 좌표(동쪽 +x, 북쪽 +y)
+export function localizer(cx, cy) {
+  const kx = 111320 * Math.cos((cy * Math.PI) / 180);
+  const ky = 110540;
+  return ([lon, lat]) => [(lon - cx) * kx, (lat - cy) * ky];
+}
+
+// GeoJSON Polygon/MultiPolygon → 바깥 고리 목록 [[ [x,y], ... ], ...]
+export function outerRings(geometry) {
+  if (!geometry) return [];
+  if (geometry.type === "Polygon") return [geometry.coordinates[0]];
+  if (geometry.type === "MultiPolygon") return geometry.coordinates.map((poly) => poly[0]);
+  return [];
+}
+
+export function buildingHeight(props) {
+  const h = Number(props && props.height);
+  if (h > 0.5) return h;
+  const f = Number(props && props.grnd_flr);
+  return f > 0 ? f * 3.3 : 3.3;
+}

@@ -437,3 +437,20 @@ input[readonly] { background: #efebe3; color: #555; cursor: default; }
 select:disabled { background: #efebe3; color: #333; opacity: 1; }
 .zone-detail { margin: 0 0 8px; padding: 8px 10px; border: 1px dashed #cfc6b6; border-radius: 8px; }
 #zone-current { margin: 0; }
+.context-dialog { border: 1px solid #e3dccf; border-radius: 14px; padding: 14px 16px; width: min(1000px, 94vw); background: #fbf9f5; }
+.context-dialog::backdrop { background: rgba(30, 24, 18, 0.35); }
+.cx-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.cx-head h3 { margin: 0; font-size: 16px; }
+.cx-modes { display: flex; gap: 6px; }
+.cx-modes .on { background: #2b2620; color: #fff; }
+.cx-view { width: 100%; height: min(62vh, 620px); border-radius: 10px; overflow: hidden; background: #f3efe7; }
+.cx-svg { width: 100%; height: 100%; display: block; }
+.cx-bg { fill: #f3efe7; }
+.cx-parcel { fill: none; stroke: #b3a892; stroke-width: 0.4; }
+.cx-site { fill: #e8a25c; fill-opacity: 0.45; stroke: #c2701f; stroke-width: 1; }
+.cx-bldg { fill: #5f5a50; stroke: #4a463e; stroke-width: 0.4; }
+.cx-bldg:hover { fill: #2b6cb0; }
+.cx-north path { fill: #2b2620; }
+.cx-north text, .cx-bar text { font-size: 9px; fill: #2b2620; }
+.cx-bar rect { fill: #2b2620; }
+.zone-result .cx-open { margin-top: 6px; display: flex; gap: 6px; align-items: center; }

@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=224";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=225";
 // 층고는 입력값(state.plate.floorHeight)을 쓴다
 const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
-import { state, subscribe, summary } from "./state.js?v=224";
+import { state, subscribe, summary } from "./state.js?v=225";
 
 const DRAW_CAP = 12;
 let renderer;
