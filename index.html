@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=222" />
+    <link rel="stylesheet" href="styles.css?v=224" />
     <script type="importmap">
       {
         "imports": {
@@ -43,15 +43,22 @@
           </span>
         </label>
         <div id="zone-result" class="zone-result" hidden></div>
-        <div class="split">
-          <label>
-            용도지역
-            <select id="zone"></select>
-          </label>
-          <label>
-            지역
-            <select id="region"></select>
-          </label>
+        <div class="split column-row">
+          <p id="zone-current" class="hint"></p>
+          <button type="button" id="open-zone-detail" class="ghost tiny">상세 입력</button>
+        </div>
+        <div id="zone-detail" class="zone-detail" hidden>
+          <div class="split">
+            <label>
+              용도지역
+              <select id="zone"></select>
+            </label>
+            <label>
+              지역 <span class="info" tabindex="0" title="주차장법 시행령 별표 1의 지역 구분. 공동주택 세대당 주차 기준(전용면적 ÷ 75·85·95·110㎡ 등)이 달라집니다.">ⓘ</span>
+              <select id="region"></select>
+            </label>
+          </div>
+          <p id="zone-auto" class="hint zone-auto" hidden>주소로 자동 맞춤 <button type="button" id="zone-unlock" class="ghost tiny">직접 수정</button></p>
         </div>
         <div id="use-form"></div>
         <div class="split column-row">
@@ -411,7 +418,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r222</span>
+        <br /><span class="hint">버전 2026-11-10 · r224</span>
       </p>
     </aside>
 
@@ -449,7 +456,7 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=222"></script>
+    <script type="module" src="src/main.js?v=224"></script>
       <div id="busy" class="busy" hidden role="status" aria-live="polite">
       <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
     </div>

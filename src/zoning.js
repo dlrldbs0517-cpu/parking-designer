@@ -110,10 +110,18 @@ export async function lookupZoning(address) {
   return { address: point.text, point, zones, limits };
 }
 
-// 주소 앞부분으로 주차장 조례 지역 구분 추정(서울 / 광역시). 그 밖은 사용자가 고른 값을 둔다.
+// 주소(시·도 + 시·군)로 주차장법 시행령 별표 1의 지역 구분을 정한다.
+// 서울 / 광역시·특별자치시·수도권(경기) 시 / 그 밖의 시·수도권 군 / 그 밖의 지역(군)
 export function regionFromAddress(address) {
-  const a = squash(address);
-  if (/^서울/.test(a)) return "seoul";
-  if (/^(부산|대구|인천|광주|대전|울산)/.test(a) || /광역시/.test(a)) return "metro";
+  const parts = String(address || "").trim().split(/\s+/);
+  const sido = parts[0] || "";
+  const sigungu = parts[1] || "";
+  if (/^서울/.test(sido)) return "seoul";
+  if (/광역시$|^(부산|대구|인천|광주|대전|울산)$/.test(sido) || /^세종/.test(sido)) return "metro";
+  const isSi = /시$/.test(sigungu);
+  const isGun = /군$/.test(sigungu);
+  if (/^경기/.test(sido)) return isGun ? "city" : isSi ? "metro" : null;
+  if (isSi) return "city";
+  if (isGun) return "other";
   return null;
 }

@@ -1,10 +1,10 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=222";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=222";
-import { drawThumb, mountPlan } from "./plan.js?v=222";
-import { stallRuleTargets } from "./stallTypes.js?v=222";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=222";
-import { lookupZoning, regionFromAddress } from "./zoning.js?v=222";
-import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=222";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=224";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=224";
+import { drawThumb, mountPlan } from "./plan.js?v=224";
+import { stallRuleTargets } from "./stallTypes.js?v=224";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=224";
+import { lookupZoning, regionFromAddress } from "./zoning.js?v=224";
+import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=224";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -317,7 +317,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=222")
+    sceneMount = import("./scene.js?v=224")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -632,6 +632,15 @@ function needClear() {
   return requiredClearHeight({ apartment: Boolean(state.demand.active && state.demand.active.apartment), noGroundAccess: state.noGroundAccess });
 }
 
+function showZoneCurrent() {
+  const el = $("zone-current");
+  if (!el) return;
+  const zone = (zoneFactors[$("zone").value] || {}).label || "";
+  const region = (housingAreaDivisor[$("region").value] || {}).label || "";
+  const auto = !$("zone-auto").hidden ? " (주소로 자동)" : "";
+  el.textContent = `용도지역 ${zone} · 지역 ${region}${auto}`;
+}
+
 function buildDemandForm() {
   $("zone").innerHTML = Object.entries(zoneFactors).map(([id, zone]) => `<option value="${id}">${zone.label}</option>`).join("");
   $("region").innerHTML = Object.entries(housingAreaDivisor).map(([id, region]) => `<option value="${id}">${region.label}</option>`).join("");
@@ -642,11 +651,13 @@ function buildDemandForm() {
   $("area-per-stall").value = String(state.demand.areaPerStall);
   $("planned-floors").value = String(state.demand.plannedFloors);
   renderUseList();
+  showZoneCurrent();
   const read = () => {
     const zoneChanged = state.demand.zone !== $("zone").value || state.demand.region !== $("region").value;
     state.demand.zone = $("zone").value;
     state.demand.region = $("region").value;
     if (zoneChanged) renderUseList();
+    showZoneCurrent();
     state.demand.projectName = $("project-name").value;
     const ordinance = numberOr($("ordinance").value, 1);
     state.demand.ordinance = Math.min(1.5, Math.max(0.5, ordinance));
@@ -713,6 +724,10 @@ function buildDemandForm() {
       if (hit) $("zone").value = hit[0];
       const region = regionFromAddress(r.address);
       if (region) $("region").value = region;
+      // 맞춘 칸은 잠그고 '주소로 자동' 표시. 풀려면 '직접 수정'.
+      $("zone").disabled = Boolean(hit);
+      $("region").disabled = Boolean(region);
+      $("zone-auto").hidden = !(hit || region);
       read();
     } catch (e) {
       box.className = "zone-result warn";
@@ -722,6 +737,18 @@ function buildDemandForm() {
     }
   };
   $("zone-lookup").addEventListener("click", lookup);
+  // 용도지역·지역 선택칸은 '상세 입력'을 열어야 보인다. 평소에는 현재 값만 한 줄로 보여 준다.
+  $("open-zone-detail").addEventListener("click", () => {
+    const box = $("zone-detail");
+    box.hidden = !box.hidden;
+    $("open-zone-detail").textContent = box.hidden ? "상세 입력" : "상세 입력 닫기";
+  });
+  $("zone-unlock").addEventListener("click", () => {
+    $("zone").disabled = false;
+    $("region").disabled = false;
+    $("zone-auto").hidden = true;
+    showZoneCurrent();
+  });
   $("site-address").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); lookup(); } });
   ["zone", "region", "project-name", "ordinance", "area-per-stall", "planned-floors"].forEach((id) => {
     $(id).addEventListener("input", read);

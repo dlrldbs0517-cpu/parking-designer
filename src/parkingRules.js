@@ -32,12 +32,27 @@ export const housingMinimumPerUnit = { default: 1, le60: 0.7 };
  * 여기 배율은 지역별 가산이 필요할 때 표만 고친다. 기본 1.
  */
 export const zoneFactors = {
+  exclusive1: { label: "제1종 전용주거지역", factor: 1 },
+  exclusive2: { label: "제2종 전용주거지역", factor: 1 },
   general1: { label: "제1종 일반주거지역", factor: 1 },
   general2: { label: "제2종 일반주거지역", factor: 1 },
   general3: { label: "제3종 일반주거지역", factor: 1 },
   semi: { label: "준주거지역", factor: 1 },
+  central: { label: "중심상업지역", factor: 1 },
   commercial: { label: "일반상업지역", factor: 1 },
   neighborhood: { label: "근린상업지역", factor: 1 },
+  distribution: { label: "유통상업지역", factor: 1 },
+  industrialExclusive: { label: "전용공업지역", factor: 1 },
+  industrialGeneral: { label: "일반공업지역", factor: 1 },
+  industrialSemi: { label: "준공업지역", factor: 1 },
+  greenConservation: { label: "보전녹지지역", factor: 1 },
+  greenProduction: { label: "생산녹지지역", factor: 1 },
+  greenNatural: { label: "자연녹지지역", factor: 1 },
+  mgmtConservation: { label: "보전관리지역", factor: 1 },
+  mgmtProduction: { label: "생산관리지역", factor: 1 },
+  mgmtPlanned: { label: "계획관리지역", factor: 1 },
+  agricultural: { label: "농림지역", factor: 1 },
+  nature: { label: "자연환경보전지역", factor: 1 },
 };
 
 /**

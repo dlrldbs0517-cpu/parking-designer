@@ -1,4 +1,4 @@
-import { assignStallTypes, tallyStallTypes, stallRuleTargets } from "./stallTypes.js?v=222";
+import { assignStallTypes, tallyStallTypes, stallRuleTargets } from "./stallTypes.js?v=224";
 
 /**
  * 주차장법 시행규칙 제3조·제6조. 확인 2026-11-08. law.go.kr
