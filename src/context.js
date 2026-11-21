@@ -2,7 +2,7 @@
 // 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다. 지도는 Leaflet(전역 L) + 브이월드 WMTS 타일.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=240";
+import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=255";
 
 const $ = (id) => document.getElementById(id);
 const MAX_SIDE = 1000;   // 영역 한 변 최대(m). 브이월드가 레이어당 1,000개까지만 준다.

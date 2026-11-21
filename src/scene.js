@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=240";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=255";
 // 층고는 입력값(state.plate.floorHeight)을 쓴다
 const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
-import { state, subscribe, summary } from "./state.js?v=240";
+import { state, subscribe, summary } from "./state.js?v=255";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -282,21 +282,29 @@ function strip(group, geometry, material, x, y, z, sx, sz) {
 function addCore(core, material, base) {
   const t = WALL_T;
   const h = floorH() - 0.05;
-  const door = 1.1;
-  wallBox(core.x + core.w / 2, base, core.y + core.d - t / 2, core.w, t, material, h);
-  wallBox(core.x + t / 2, base, core.y + core.d / 2, t, core.d, material, h);
-  wallBox(core.x + core.w - t / 2, base, core.y + core.d / 2, t, core.d, material, h);
-  const gap = Math.min(door, core.w * 0.34);
-  const left = (core.w - gap) / 2;
-  if (left > 0.2) {
-    wallBox(core.x + left / 2, base, core.y + t / 2, left, t, material, h);
-    wallBox(core.x + core.w - left / 2, base, core.y + t / 2, left, t, material, h);
-  }
+  const face = core.doorFace || "s";
+  const gap = Math.min(1.1, (face === "n" || face === "s" ? core.w : core.d) * 0.34);
   const frame = standard("#2b2a28", 0.5);
-  wallBox(core.x + core.w / 2, base, core.y + 0.08, gap + 0.16, 0.08, frame, 2.15);
   const doorMat = standard("#3d4a43", 0.55);
-  wallBox(core.x + core.w / 2, base, core.y + 0.12, gap * 0.46, 0.04, doorMat, 2.05);
-  wallBox(core.x + core.w / 2 + gap * 0.26, base, core.y + 0.16, gap * 0.42, 0.04, doorMat, 2.05);
+  // 네 면 벽. 출입문 면은 가운데를 문 폭만큼 비우고 문틀·문짝을 단다.
+  const wall = (f) => {
+    const horizontal = f === "n" || f === "s";
+    const len = horizontal ? core.w : core.d;
+    const fixed = f === "n" ? core.y + core.d - t / 2 : f === "s" ? core.y + t / 2 : f === "e" ? core.x + core.w - t / 2 : core.x + t / 2;
+    const start = horizontal ? core.x : core.y;
+    const put = (a, l, thick, mat, height, inset = 0) => {
+      const inward = f === "n" || f === "e" ? -inset : inset;
+      if (horizontal) wallBox(start + a + l / 2, base, fixed + inward, l, thick, mat, height);
+      else wallBox(fixed + inward, base, start + a + l / 2, thick, l, mat, height);
+    };
+    if (f !== face) { put(0, len, t, material, h); return; }
+    const side = (len - gap) / 2;
+    if (side > 0.2) { put(0, side, t, material, h); put(len - side, side, t, material, h); }
+    put(side - 0.08, gap + 0.16, 0.08, frame, 2.15, 0.04);
+    put(side, gap * 0.46, 0.04, doorMat, 2.05, 0.08);
+    put(side + gap * 0.54, gap * 0.42, 0.04, doorMat, 2.05, 0.12);
+  };
+  ["n", "s", "e", "w"].forEach(wall);
   wallBox(core.x + core.w * 0.34, base, core.y + core.d / 2, t, core.d - t * 2, material, h);
   wallBox(core.x + core.w * 0.67, base, core.y + core.d / 2, t, core.d - t * 2, material, h);
   const cabin = standard("#1c1c1c", 0.4);

@@ -91,7 +91,11 @@ const gridCase = (spansX) => layoutParking({
 }).gridX.join(", ");
 for (const [label, spans, expect] of [["비움 (8.1m 하나)", null, "0.5, 8.6, 16.7, 24.8, 32.9, 41, 47.5"], ["4, 5, 6", [4, 5, 6], "0.5, 4.5, 9.5, 15.5, 21.5, 27.5, 33.5, 39.5, 47.5"], ["8.4", [8.4], "0.5, 8.9, 17.3, 25.7, 34.1, 42.5, 47.5"]]) {
   const got = gridCase(spans);
-  console.log(`| ${label} | ${got} | ${expect} | ${ok(got === expect)} |`);
+  // 비움 = 기둥 격자 먼저(차로를 피해 칸마다 조정): 정해진 값 대신 '기둥 간격 12m 이하'로 판정
+  const free = spans == null;
+  const lines = got.split(", ").map(Number);
+  const pass = free ? lines.every((v, i) => i === 0 || v - lines[i - 1] <= 12 + 1e-6) : got === expect;
+  console.log(`| ${label} | ${got} | ${free ? "간격 12m 이하" : expect} | ${ok(pass)} |`);
 }
 
 console.log("\n## 7. 막다른 차로 정리 · 진입 불가 칸 제외 (기본 48×42m, 내부 램프 서측)");

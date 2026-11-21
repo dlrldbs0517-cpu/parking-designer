@@ -1,11 +1,11 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=240";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=240";
-import { drawThumb, mountPlan } from "./plan.js?v=240";
-import { stallRuleTargets } from "./stallTypes.js?v=240";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=240";
-import { lookupZoning, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=240";
-import { bindContextDialog, closeContext, openContext } from "./context.js?v=240";
-import { addCore, applyVariant, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=240";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=255";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=255";
+import { drawThumb, mountPlan } from "./plan.js?v=255";
+import { stallRuleTargets } from "./stallTypes.js?v=255";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=255";
+import { lookupZoning, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=255";
+import { bindContextDialog, closeContext, openContext } from "./context.js?v=255";
+import { addCore, removeCore, applyVariant, setVariantOption, setCoreDoor, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=255";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -201,6 +201,7 @@ document.querySelectorAll("#tools button").forEach((button) => {
 fields.coreArea.addEventListener("change", () => updateCoreArea(Number(fields.coreArea.value)));
 $("core-nx").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
 $("core-ny").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
+$("core-door").addEventListener("change", () => setCoreDoor($("core-door").value));
 $("open-core-dialog").addEventListener("click", () => $("core-dialog").showModal());
 $("auto-core").addEventListener("click", () => busy("코어 자리 찾는 중…", autoPlaceCore));
 $("close-core-dialog").addEventListener("click", () => $("core-dialog").close());
@@ -221,6 +222,12 @@ $("ramp-auto").addEventListener("click", () => {
 $("place-split").addEventListener("click", placeSplitExample);
 $("place-overlap").addEventListener("click", placeOverlapExample);
 $("add-core").addEventListener("click", addCore);
+$("remove-core").addEventListener("click", removeCore);
+subscribe(() => {
+  const none = !state.cores || state.cores.length === 0;
+  $("remove-core").disabled = none;
+  ["core-pick", "core-nx", "core-ny", "core-door"].forEach((id) => { if ($(id)) $(id).disabled = none; });
+});
 $("core-pick").addEventListener("change", () => selectCore(Number($("core-pick").value)));
 $("play-build").addEventListener("click", playBuild);
 $("show-conflicts").addEventListener("click", () => {
@@ -320,7 +327,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=240")
+    sceneMount = import("./scene.js?v=255")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -473,6 +480,8 @@ function render() {
     } else {
       if (document.activeElement !== $("core-nx")) $("core-nx").value = String(state.core.nx || 1);
       if (document.activeElement !== $("core-ny")) $("core-ny").value = String(state.core.ny || 1);
+      if (document.activeElement !== $("core-door")) $("core-door").value = state.core.door || "auto";
+      $("core-door-note").textContent = state.core.door ? "" : `자동: ${{ n: "북", s: "남", e: "동", w: "서" }[state.core.doorFace] || "-"}쪽 면(차로와 가장 길게 맞닿은 면)`;
       $("core-size-note").textContent = `${state.core.w}×${state.core.d}m (${Math.round(state.core.w * state.core.d)}㎡)${recText}`;
     }
     $("core-search-note").textContent = state.cores.length !== 1
@@ -510,6 +519,14 @@ function render() {
 
   $("reference-notes").textContent = state.referenceNotes.join(" ");
   $("compare-dock").hidden = step !== 2 || !state.variants.length;
+  $("variant-options").hidden = step !== 2 || !state.variants.length;
+  document.querySelectorAll("#variant-options input[data-opt]").forEach((box) => { box.checked = Boolean(state.variantOptions[box.dataset.opt]); box.disabled = Boolean(state.optionBusy); });
+  {
+    const v = state.variants[state.variantIndex];
+    const notes = state.optionBusy ? ["다시 짜는 중…"] : (v && v.optionNotes) || [];
+    $("variant-option-note").textContent = notes.join(" · ");
+    $("variant-option-note").hidden = !notes.length;
+  }
   renderCompare();
   renderCorePick();
 
@@ -545,7 +562,9 @@ function render() {
 
 function renderCorePick() {
   const select = $("core-pick");
-  const markup = state.cores.map((core, index) => `<option value="${index}">코어 ${index + 1} · ${core.w.toFixed(1)}×${core.d.toFixed(1)}m</option>`).join("");
+  const markup = state.cores.length
+    ? state.cores.map((core, index) => `<option value="${index}">코어 ${index + 1} · ${core.w.toFixed(1)}×${core.d.toFixed(1)}m</option>`).join("")
+    : `<option value="">코어 없음</option>`;
   if (select.innerHTML !== markup) select.innerHTML = markup;
   if (state.cores.length) select.value = String(state.coreIndex);
 }
@@ -553,7 +572,7 @@ function renderCorePick() {
 function renderCompare() {
   const dock = $("compare-dock");
   if (dock.hidden) return;
-  const key = state.variants.map((variant) => `${variant.id}:${variant.metrics.stalls}:${variant.metrics.valid}:${variant.recommended}:${variant.maxStalls}`).join("|") + `#${state.variantIndex}#${isReference()}`;
+  const key = state.variants.map((variant) => `${variant.id}:${variant.name}:${variant.metrics.stalls}:${variant.metrics.valid}:${variant.recommended}:${variant.maxStalls}`).join("|") + `#${state.variantIndex}#${isReference()}`;
   if (key === compareKey && dock.childElementCount) {
     dock.querySelectorAll(".compare-card").forEach((card, index) => {
       card.classList.toggle("on", index === state.variantIndex);
@@ -571,11 +590,13 @@ function renderCompare() {
     const tags = [
       variant.recommended ? '<span class="tag">추천</span>' : "",
       variant.maxStalls ? '<span class="tag max">최대 주차칸</span>' : "",
-      variant.uniform ? '<span class="tag uniform">방향 통일</span>' : "",
-      variant.coreSide ? '<span class="tag uniform">장애인 코어 인접</span>' : "",
-      variant.coreRamp ? '<span class="tag uniform">코어 램프 인접</span>' : "",
     ].filter(Boolean).join(" ");
-    button.innerHTML = `<p>${tags ? `${tags} ` : ""}${variant.id} ${variant.name}<br>${metrics.stalls}대 · ${metrics.areaPerStall.toFixed(1)}㎡/대${isReference() ? ` · 유사 ${metrics.similarity}` : ""}<br>${metrics.connected ? "연결" : "끊김"} · 충돌 ${metrics.columnHits} · 막다른 ${metrics.deadEnds}${metrics.valid ? "" : ` · 탈락 ${metrics.rejected}`}</p>`;
+    const anyOpt = Object.values(state.variantOptions || {}).some(Boolean);
+    const delta = variant.optionDelta || 0;
+    const optText = anyOpt ? ` · 옵션 ${delta > 0 ? "+" : ""}${delta}대` : "";
+    const spanWarn = (variant.issues || []).some((issue) => issue.type === "span") ? " · 기둥 12m 초과" : "";
+    const walkText = metrics.disabledWalk != null ? ` · 장애인→문 ${metrics.disabledWalk}m` : "";
+    button.innerHTML = `<p>${tags ? `${tags} ` : ""}${variant.id} ${variant.name}<br>${metrics.stalls}대${optText} · ${metrics.areaPerStall.toFixed(1)}㎡/대${isReference() ? ` · 유사 ${metrics.similarity}` : ""}${spanWarn}<br>${metrics.connected ? "연결" : "끊김"}${walkText} · 충돌 ${metrics.columnHits} · 막다른 ${metrics.deadEnds}${metrics.valid ? "" : ` · 탈락 ${metrics.rejected}`}</p>`;
     button.prepend(canvas);
     button.addEventListener("click", () => applyVariant(index));
     dock.appendChild(button);
@@ -973,3 +994,14 @@ function typeReadout() {
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+
+document.querySelectorAll("#variant-options input[data-opt]").forEach((box) => {
+  box.addEventListener("change", () => {
+    // 다시 짜는 데 1~3초 걸려서, 먼저 '다시 짜는 중'을 보여 주고 다음 프레임에 계산
+    const on = box.checked;
+    state.variantOptions = { ...state.variantOptions, [box.dataset.opt]: on };   // 체크 표시가 바로 유지되게
+    state.optionBusy = true;
+    emit();
+    setTimeout(() => { state.optionBusy = false; setVariantOption(box.dataset.opt, on); }, 30);
+  });
+});

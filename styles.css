@@ -213,7 +213,7 @@ main { position: relative; min-width: 0; min-height: 100%; }
   inset: 0;
 }
 
-#plan-view { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+#plan-view { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
 
 #compare-dock {
   display: flex;
@@ -475,3 +475,13 @@ select:disabled { background: #efebe3; color: #333; opacity: 1; }
 .cx-bar2 { position: absolute; left: 16px; bottom: 14px; pointer-events: none; color: #2b2620; font-size: 12px; }
 .cx-bar2 span { display: block; margin-bottom: 2px; }
 .cx-bar2 i { display: block; height: 4px; background: #2b2620; }
+.core-buttons { display: flex; flex-direction: column; gap: 6px; align-self: end; }
+.core-buttons button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.variant-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 0 16px 6px; font-size: 12px; color: var(--ink); }
+.variant-options > span { color: var(--muted, #6b6b6b); }
+.variant-options label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; font-size: 12px; }
+.variant-options input[type="checkbox"] { width: auto; min-height: 0; height: auto; padding: 0; margin: 0; }
+.variant-options[hidden] { display: none; }
+#plan-view > #plan { grid-row: 4; }
+.variant-options .option-note { flex-basis: 100%; color: #8a5a14; }

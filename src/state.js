@@ -1,4 +1,4 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=240";
+import { calculateDemand, emptyDemand } from "./demand.js?v=255";
 import {
   basementCount,
   clampCore,
@@ -15,7 +15,7 @@ import {
   referenceCase,
   searchPlacement,
   snapCore,
-} from "./layout.js?v=240";
+} from "./layout.js?v=255";
 
 export const state = {
   step: 1,
@@ -33,6 +33,7 @@ export const state = {
   siteMargin: 20,
   siteMargins: { n: null, s: null, e: null, w: null },
   roadEdge: "w",   // 도로에 접한 변: 램프·출입구를 이 변에 둔다
+  noCore: false,   // 사용자가 코어를 모두 지운 상태(평면 만들기 때 기본 코어를 다시 넣지 않음)
   coreAuto: true,  // 평면 만들기 때 코어 자리를 자동 탐색(평면에서 코어를 직접 옮기면 끔)
   rampPos: "auto", // 그 변 안 램프 위치: auto(대수 최대) · start(서/남 끝) · mid · end(동/북 끝)   // 방향별 대지 여유(비우면 공통 값)
   // 장애인전용 주차구획. 적용 대상인지는 법정 대수(10대 이상)로 판단한다.
@@ -76,6 +77,8 @@ export const state = {
   ramps: [],
   variants: [],
   variantIndex: 0,
+  // 배치안 옵션: 장애인 칸 코어 옆 · 칸 방향 통일 · 코어 램프 옆 (세 배치안 모두에 적용)
+  variantOptions: { coreAisle: false, uniform: false, coreRamp: false },
   spec: null,
   revealStage: 6,
   referenceNotes: [],
@@ -175,10 +178,12 @@ function adopt(result, keepObjects) {
   }
 }
 
-export function refreshVariants(lockRamp = false) {
+export function refreshVariants(lockRamp = false, quick = false) {
   if (!state.plate) return;
   state.variants = generateVariants({
     lockRamp,
+    noRampAlt: quick,
+    options: state.variantOptions,
     plate: state.plate,
     cores: state.cores,
     openings: state.openings,
@@ -221,7 +226,7 @@ export function rebuildLayout() {
   adopt(result, true);
   // 레이아웃이 코어를 램프 밖으로 밀었으면 화면의 코어도 같은 자리로(3D와 평면이 어긋나지 않게).
   (result.cores || []).forEach((fixed, i) => {
-    if (state.cores[i]) { state.cores[i].x = fixed.x; state.cores[i].y = fixed.y; }
+    if (state.cores[i]) { state.cores[i].x = fixed.x; state.cores[i].y = fixed.y; state.cores[i].doorFace = fixed.doorFace; }
   });
   syncCore();
   // 레이아웃이 램프 위치·폭을 보정했으면(벽에 붙이기, 곡선 6.5m) 화면의 램프도 맞춘다.
@@ -330,7 +335,7 @@ export function generatePlate() {
   // 순서: 층고 → 법정 경사(직선 17%, 곡선 14%, 완화구간)로 램프 길이 고정 → 배치. 사용자가 길이를 바꾸지 않는다.
   state.rampLength = autoLength;
   state.ramps = state.ramps.map((ramp) => ({ ...ramp, length: autoLength }));
-  if (!state.cores.length) state.cores = [defaultCore(state.plate)];
+  if (!state.cores.length && !state.noCore) state.cores = [defaultCore(state.plate)];
   // 격자 맞춤 코어는 기둥 간격이 바뀌었어도 같은 칸 수로 다시 맞춘다.
   state.cores = state.cores.map((core) => {
     if (core.grid === false) return clampCore(core, state.plate);
@@ -343,8 +348,9 @@ export function generatePlate() {
   syncCore();
   seedAccess();
   state.referenceNotes = [];
-  refreshVariants();
-  if (state.rampPos === "auto" && !state.accessNote) {
+  const autoPos = state.rampPos === "auto" && !state.accessNote;
+  refreshVariants(false, autoPos);
+  if (autoPos) {
     // 도로변 안에서 끝·가운데·끝을 모두 돌려 보고 추천안 대수가 가장 많은 위치를 쓴다.
     const scoreOf = () => {
       const v = state.variants.find((item) => item.recommended) || state.variants[0];
@@ -355,13 +361,15 @@ export function generatePlate() {
     let bestVariants = state.variants;
     ["mid", "end"].forEach((pos) => {
       state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos }));
-      refreshVariants();
+      refreshVariants(false, true);
       const score = scoreOf();
       if (score > bestScore) { bestScore = score; bestPos = pos; bestVariants = state.variants; }
     });
     state.ramps = state.ramps.map((ramp) => ({ ...ramp, pos: bestPos }));
     state.variants = bestVariants;
     state.autoRampPos = bestPos;
+    void bestVariants;
+    refreshVariants();   // 고른 램프 자리로 램프 위치안까지 다시
   } else {
     state.autoRampPos = null;
   }
@@ -498,6 +506,7 @@ export function updateCore(partial) {
   state.coreAuto = false;   // 직접 손댄 코어는 다음 평면 만들기 때 자동으로 옮기지 않는다
   // 가로·세로를 m로 직접 넣으면 격자 맞춤을 끄고, 칸 수를 고르면 다시 켠다.
   const merged = { ...current, ...partial };
+  if (partial.x != null || partial.y != null) merged.manual = true;   // 끌어 놓은 코어: 램프와 겹치면 램프 면에 붙임
   if (partial.w != null || partial.d != null) { merged.grid = false; delete merged.nx; delete merged.ny; }
   if (partial.nx != null || partial.ny != null) {
     merged.grid = true;
@@ -524,10 +533,23 @@ export function selectCore(index) {
 
 export function addCore() {
   if (!state.plate) return;
+  state.noCore = false;
   const core = defaultCore(state.plate);
   core.x = round1(core.x + state.cores.length * 2);
   state.cores.push(clampCore(core, state.plate));
   state.coreIndex = state.cores.length - 1;
+  syncCore();
+  rebuildLayout();
+  emit();
+}
+
+// 선택한 코어 삭제. 마지막 하나도 지울 수 있다(코어 없이 배치, '코어 추가'로 다시 만듦).
+export function removeCore() {
+  if (!state.plate || !state.cores.length) return;
+  state.cores.splice(state.coreIndex, 1);
+  state.noCore = state.cores.length === 0;
+  state.coreIndex = Math.max(0, Math.min(state.coreIndex, state.cores.length - 1));
+  if (state.selection && state.selection.type === "core") state.selection = null;
   syncCore();
   rebuildLayout();
   emit();
@@ -590,15 +612,17 @@ export function placeRamp(edge, t) {
   emit();
 }
 
-export function moveRamp(id, edge, t) {
+export function moveRamp(id, edge, t, offset = undefined) {
   const index = state.ramps.findIndex((item) => item.id === id);
   if (index < 0) return;
+  const { inset, ...prev } = state.ramps[index];
   state.ramps[index] = clampOpening({
-    ...state.ramps[index],
+    ...prev,
     edge,
     t,
     pos: null,   // 직접 끌어 놓은 위치를 그대로 쓴다
     placement: state.rampPlacement,
+    offset: offset === undefined ? prev.offset : (offset == null ? undefined : offset),   // 벽에서 떨어뜨려 놓은 거리(없으면 기본 자리)
   }, state.plate);
   state.ramps[index].placement = state.rampPlacement;
   if (state.entranceMode === "integrated") syncIntegrated(state.ramps[index]);
@@ -762,5 +786,27 @@ export function updateSiteMargins(common, perDir) {
     state.plate.siteMargins = state.siteMargins;
     rebuildLayout();
   }
+  emit();
+}
+
+// 배치안 옵션을 켜고 끄면 세 배치안을 다시 짜고, 보고 있던 종류(가로/세로/램프 위치)를 그대로 보여 준다.
+export function setVariantOption(key, on) {
+  state.variantOptions = { ...state.variantOptions, [key]: Boolean(on) };
+  if (!state.plate) { emit(); return; }
+  const kind = state.variants[state.variantIndex]?.kind;
+  const ramp = state.ramps[0];
+  refreshVariants(Boolean(ramp && ramp.offset != null));
+  let index = state.variants.findIndex((variant) => variant.kind === kind);
+  if (index < 0) index = Math.max(0, state.variants.findIndex((variant) => variant.recommended));
+  applyVariant(index);
+}
+
+// 코어 출입문 면: "auto"(차로와 가장 길게 맞닿은 면) 또는 n/s/e/w. 코어 자리는 그대로, 배치만 다시(장애인 칸 자리 등).
+export function setCoreDoor(face) {
+  const core = state.cores[state.coreIndex];
+  if (!core || !state.plate) return;
+  if (face === "auto") delete core.door; else core.door = face;
+  syncCore();
+  rebuildLayout();
   emit();
 }

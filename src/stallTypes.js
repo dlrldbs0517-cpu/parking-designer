@@ -322,12 +322,34 @@ function assignDisabled(list, t, ctx) {
   const bays = new Map();
   list.forEach((stall) => {
     if (!stall.bay) return;
-    if (!bays.has(stall.bay)) bays.set(stall.bay, []);
-    bays.get(stall.bay).push(stall);
+    // 같은 bay 이름이 여러 줄·구간에 겹칠 수 있어(빈자리 채우기) 구간 시작점·줄 위치까지 묶음 기준으로
+    const key = `${stall.bay}|${stall.bayFrom}|${stall.along === "x" ? stall.y : stall.x}`;
+    if (!bays.has(key)) bays.set(key, []);
+    bays.get(key).push(stall);
   });
+  // 순서(2026-11-21): ① 코어 출입문까지 가는 직선이 차로를 건너지 않는 묶음 먼저
+  // ② 칸 앞에서 코어 출입문까지 실제로 걸어가는 거리(차로를 따라, 기둥·코어는 돌아서)가 짧은 순서
+  const cores = ctx.cores || [];
+  const walk = cores.length ? walkField(ctx) : null;
+  const doorOf = (items) => {
+    const p = bayCenter(items);
+    const doors = cores.map(doorPoint);
+    return doors.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+  };
+  const crossing = (items) => (cores.length ? crossesAisleTo(items, doorOf(items), ctx.aisles || []) : false);
+  const walkOf = (stall) => (walk ? walk(entryOf(stall)) : Infinity);
+  const bayWalk = (items) => {
+    const w = Math.min(...items.map(walkOf));
+    if (Number.isFinite(w)) return w;
+    const d = doorOf(items);
+    const p = bayCenter(items);
+    return 1000 + Math.hypot(d.x - p.x, d.y - p.y);   // 걸어서 못 가는 묶음은 뒤로
+  };
   const fullBays = [...bays.values()]
     .filter((items) => items.length === items[0].bayCount)
-    .sort((a, b) => distance(a, anchors) - distance(b, anchors));
+    .map((items) => ({ items, key: (crossing(items) ? 1e6 : 0) + (cores.length ? bayWalk(items) : distance(items, anchors)) }))
+    .sort((a, b) => a.key - b.key)
+    .map((b) => b.items);
 
   for (const bay of fullBays) {
     const need = Math.ceil(list.length * t.disabledRate - 1e-9) - countType(list, "disabled");
@@ -336,8 +358,145 @@ function assignDisabled(list, t, ctx) {
     const k = Math.min(need, Math.floor((usable + 1e-9) / DISABLED_W));
     if (k < 1) continue;
     const rest = Math.floor((usable - k * DISABLED_W + 1e-9) / GENERAL_W);
-    repack(list, bay, Array(k).fill("disabled").concat(Array(rest).fill("general")), ctx, minClear);
+    // 묶음 안에서도 출입문까지 걸어서 가까운 쪽 끝에 장애인 칸이 오게
+    let plan = Array(k).fill("disabled").concat(Array(rest).fill("general"));
+    if (cores.length && doorAtEnd(bay, walkOf, cores)) plan = plan.reverse();
+    repack(list, bay, plan, ctx, minClear);
   }
+}
+
+// 코어 출입문 위치: 출입문 면(doorFace: n=위(y 큰 쪽), s, e, w) 가운데. 면이 없으면 코어 가운데.
+export function doorPoint(core) {
+  const f = core.doorFace;
+  if (f === "n") return { x: core.x + core.w / 2, y: core.y + core.d };
+  if (f === "s") return { x: core.x + core.w / 2, y: core.y };
+  if (f === "e") return { x: core.x + core.w, y: core.y + core.d / 2 };
+  if (f === "w") return { x: core.x, y: core.y + core.d / 2 };
+  return { x: core.x + core.w / 2, y: core.y + core.d / 2 };
+}
+
+// 칸에서 내려 걷기 시작하는 점: 칸 앞(차로 쪽) 가운데에서 0.6m 차로 안
+export function entryOf(stall) {
+  const a = stall.aisle;
+  if (a === "n") return { x: stall.x + stall.w / 2, y: stall.y + stall.d + 0.6 };
+  if (a === "s") return { x: stall.x + stall.w / 2, y: stall.y - 0.6 };
+  if (a === "e") return { x: stall.x + stall.w + 0.6, y: stall.y + stall.d / 2 };
+  if (a === "w") return { x: stall.x - 0.6, y: stall.y + stall.d / 2 };
+  return { x: stall.x + stall.w / 2, y: stall.y + stall.d / 2 };
+}
+
+// 걷는 거리 지도: 0.5m 칸 격자, 차로 위만 걸을 수 있고 기둥·코어는 피한다. 출발점 = 모든 코어 출입문 앞.
+// 돌려주는 함수: 점 → 가장 가까운 출입문까지 걷는 거리(m). 차로에서 2m 넘게 떨어진 점은 Infinity.
+export function walkField(ctx) {
+  const plate = ctx.plate;
+  const h = 0.5;
+  const nx = Math.max(1, Math.ceil(plate.width / h));
+  const ny = Math.max(1, Math.ceil(plate.depth / h));
+  const N = nx * ny;
+  const ok = new Uint8Array(N);
+  const inside = (r, x, y, pad = 0) => x > r.x - pad && x < r.x + r.w + pad && y > r.y - pad && y < r.y + r.d + pad;
+  const aisles = ctx.aisles || [];
+  const solids = (ctx.columns || []).map((c) => ({ ...c, pad: 0.1 })).concat((ctx.cores || []).map((c) => ({ ...c, pad: 0 })));
+  for (let j = 0; j < ny; j += 1) {
+    for (let i = 0; i < nx; i += 1) {
+      const x = (i + 0.5) * h;
+      const y = (j + 0.5) * h;
+      if (!aisles.some((a) => inside(a, x, y))) continue;
+      if (solids.some((r) => inside(r, x, y, r.pad))) continue;
+      ok[j * nx + i] = 1;
+    }
+  }
+  const cellOf = (p) => ({ i: Math.min(nx - 1, Math.max(0, Math.floor(p.x / h))), j: Math.min(ny - 1, Math.max(0, Math.floor(p.y / h))) });
+  // 점에서 가장 가까운 걸을 수 있는 칸(반경 r m 안)
+  const nearest = (p, r) => {
+    const c = cellOf(p);
+    const k = Math.ceil(r / h);
+    let best = null;
+    for (let dj = -k; dj <= k; dj += 1) {
+      for (let di = -k; di <= k; di += 1) {
+        const i = c.i + di;
+        const j = c.j + dj;
+        if (i < 0 || j < 0 || i >= nx || j >= ny || !ok[j * nx + i]) continue;
+        const d = Math.hypot((i + 0.5) * h - p.x, (j + 0.5) * h - p.y);
+        if (d <= r && (!best || d < best.d)) best = { idx: j * nx + i, d };
+      }
+    }
+    return best;
+  };
+  const dist = new Float64Array(N).fill(Infinity);
+  const heap = [];
+  const push = (idx, d) => {
+    heap.push([d, idx]);
+    let k = heap.length - 1;
+    while (k > 0) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; }
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      let k = 0;
+      for (;;) {
+        const l = 2 * k + 1; const r = l + 1; let m = k;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === k) break;
+        [heap[m], heap[k]] = [heap[k], heap[m]]; k = m;
+      }
+    }
+    return top;
+  };
+  (ctx.cores || []).forEach((core) => {
+    const door = doorPoint(core);
+    const start = nearest(door, 3);
+    if (start && start.d < dist[start.idx]) { dist[start.idx] = start.d; push(start.idx, start.d); }
+  });
+  const steps = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
+  while (heap.length) {
+    const [d, idx] = pop();
+    if (d > dist[idx]) continue;
+    const i = idx % nx;
+    const j = (idx - i) / nx;
+    for (const [di, dj, c] of steps) {
+      const a = i + di;
+      const b = j + dj;
+      if (a < 0 || b < 0 || a >= nx || b >= ny) continue;
+      const n = b * nx + a;
+      if (!ok[n]) continue;
+      if (di && dj && (!ok[j * nx + a] || !ok[b * nx + i])) continue;   // 모서리 끼어 지나가기 금지
+      const nd = d + c * h;
+      if (nd < dist[n]) { dist[n] = nd; push(n, nd); }
+    }
+  }
+  return (p) => {
+    const c = nearest(p, 2);
+    return c ? dist[c.idx] + c.d : Infinity;
+  };
+}
+
+// 묶음의 뒤쪽 끝(bayTo 쪽) 칸이 앞쪽 끝 칸보다 출입문까지 걸어서 가까우면 true
+function doorAtEnd(bay, walkOf, cores) {
+  const along = bay[0].along === "x" ? "x" : "y";
+  const sorted = bay.slice().sort((a, b) => a[along] - b[along]);
+  const a = walkOf(sorted[0]);
+  const b = walkOf(sorted[sorted.length - 1]);
+  if (Number.isFinite(a) || Number.isFinite(b)) return b < a;
+  return coreAtEnd(bay, cores);
+}
+
+// 칸 묶음 가운데 → 코어 출입문까지 직선이 차로(가장자리 0.3m 안쪽)를 지나면 '차로를 건넌다'
+function crossesAisleTo(items, door, aisles) {
+  const p = bayCenter(items);
+  const q = door;
+  const len = Math.hypot(q.x - p.x, q.y - p.y);
+  const steps = Math.max(1, Math.ceil(len / 0.5));
+  for (let i = 1; i < steps; i += 1) {
+    const x = p.x + ((q.x - p.x) * i) / steps;
+    const y = p.y + ((q.y - p.y) * i) / steps;
+    if (Math.hypot(q.x - x, q.y - y) < 2.5) continue;   // 출입문 앞 2.5m(문 앞 차로 가장자리)는 건너는 것으로 보지 않음
+    if (aisles.some((a) => x > a.x + 0.3 && x < a.x + a.w - 0.3 && y > a.y + 0.3 && y < a.y + a.d - 0.3)) return true;
+  }
+  return false;
 }
 
 export function tallyStallTypes(list, t) {
@@ -428,6 +587,49 @@ function anchorOf(item, plate) {
   if (item.edge === "n") return { x: t, y: plate.depth };
   if (item.edge === "e") return { x: plate.width, y: t };
   return { x: 0, y: t };
+}
+
+function bayCenter(items) {
+  const c = items.reduce((acc, s) => ({ x: acc.x + s.x + s.w / 2, y: acc.y + s.y + s.d / 2 }), { x: 0, y: 0 });
+  return { x: c.x / items.length, y: c.y / items.length };
+}
+
+function nearestOnRect(p, r) {
+  return { x: Math.max(r.x, Math.min(r.x + r.w, p.x)), y: Math.max(r.y, Math.min(r.y + r.d, p.y)) };
+}
+
+function nearestCore(p, cores) {
+  return cores.map((c) => ({ c, q: nearestOnRect(p, c) })).sort((a, b) => Math.hypot(a.q.x - p.x, a.q.y - p.y) - Math.hypot(b.q.x - p.x, b.q.y - p.y))[0];
+}
+
+function distanceToRects(items, cores) {
+  const p = bayCenter(items);
+  const { q } = nearestCore(p, cores);
+  return Math.hypot(q.x - p.x, q.y - p.y);
+}
+
+// 칸 묶음 가운데 → 가장 가까운 코어 벽까지 직선이 차로(가장자리 0.3m 안쪽)를 지나면 '차로를 건넌다'
+function crossesAisle(items, cores, aisles) {
+  const p = bayCenter(items);
+  const { q } = nearestCore(p, cores);
+  const len = Math.hypot(q.x - p.x, q.y - p.y);
+  const steps = Math.max(1, Math.ceil(len / 0.5));
+  for (let i = 1; i < steps; i += 1) {
+    const x = p.x + ((q.x - p.x) * i) / steps;
+    const y = p.y + ((q.y - p.y) * i) / steps;
+    if (aisles.some((a) => x > a.x + 0.3 && x < a.x + a.w - 0.3 && y > a.y + 0.3 && y < a.y + a.d - 0.3)) return true;
+  }
+  return false;
+}
+
+// 코어가 묶음의 bayTo 쪽(뒤쪽 끝)에 있으면 true
+function coreAtEnd(bay, cores) {
+  const first = bay[0];
+  const p = bayCenter(bay);
+  const { c } = nearestCore(p, cores);
+  const mid = (first.bayFrom + first.bayTo) / 2;
+  const cc = first.along === "x" ? c.x + c.w / 2 : c.y + c.d / 2;
+  return cc > mid;
 }
 
 function distance(items, anchors) {

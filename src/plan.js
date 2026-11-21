@@ -1,5 +1,5 @@
-import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=240";
-import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=240";
+import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=255";
+import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=255";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -155,6 +155,18 @@ export function mountPlan(canvas) {
       ctx.fillRect(core.x, core.y, core.w, core.d);
       ctx.strokeRect(core.x, core.y, core.w, core.d);
       label(ctx, state.cores.length > 1 ? `코어 ${index + 1}` : "코어", core.x + core.w / 2, core.y + core.d / 2, "#2c4a6e");
+      // 출입문 표시(면 가운데 1.2m 굵은 선)
+      const f = core.doorFace;
+      if (f) {
+        const L = 1.2;
+        const T = 0.35;
+        const r = f === "n" ? { x: core.x + core.w / 2 - L / 2, y: core.y + core.d - T, w: L, d: T }
+          : f === "s" ? { x: core.x + core.w / 2 - L / 2, y: core.y, w: L, d: T }
+          : f === "e" ? { x: core.x + core.w - T, y: core.y + core.d / 2 - L / 2, w: T, d: L }
+          : { x: core.x, y: core.y + core.d / 2 - L / 2, w: T, d: L };
+        ctx.fillStyle = "#c2552d";
+        ctx.fillRect(r.x, r.y, r.w, r.d);
+      }
     });
 
     if (shown("column")) {
@@ -218,7 +230,11 @@ export function mountPlan(canvas) {
     }
     if (target?.type === "ramp" && !adding) {
       selectItem({ type: "ramp", id: target.ramp.id });
-      drag = { mode: "ramp", id: target.ramp.id, edge: target.ramp.edge };
+      // 벽~램프 시작 거리(start)와 잡은 점까지의 깊이(grab)를 기억 → 끌면 벽에서 떨어뜨려 놓을 수 있다
+      const fp = rampFootprint(target.ramp, state.plate);
+      const start = wallDist(target.ramp.edge, fp, state.plate);
+      const base = rampFootprint({ ...target.ramp, offset: undefined, inset: undefined }, state.plate);
+      drag = { mode: "ramp", id: target.ramp.id, edge: target.ramp.edge, grab: pointDist(target.ramp.edge, world, state.plate) - start, base: wallDist(target.ramp.edge, base, state.plate) };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
@@ -266,7 +282,11 @@ export function mountPlan(canvas) {
     if (drag.mode === "ramp") {
       const current = state.ramps.find((item) => item.id === drag.id);
       if (!current) return;
-      moveRamp(drag.id, edge ? edge.edge : current.edge, edge ? edge.t : projectAlong(current.edge, world));
+      // 가장 가까운 벽을 기준으로: 그 벽을 따라 t, 벽에서 떨어진 거리 offset(기본 자리보다 1m 넘게 안쪽일 때만)
+      const near = nearestWall(world, state.plate);
+      const depth = pointDist(near, world, state.plate) - drag.grab;
+      const offset = depth > drag.base + 1 ? Math.round(depth * 10) / 10 : null;
+      moveRamp(drag.id, near, projectAlong(near, world), offset);
     }
   });
 
@@ -371,6 +391,20 @@ function hitGate(point, gates) {
 function hitRamp(point) {
   const body = state.ramps.find((ramp) => rampShape(ramp, state.plate).pieces.some((piece) => hit(point, piece)));
   return body || hitGate(point, state.ramps);
+}
+
+function pointDist(edge, p, plate) {
+  return { w: p.x, e: plate.width - p.x, s: p.y, n: plate.depth - p.y }[edge];
+}
+
+// 램프 발자국의 벽 쪽 끝이 벽에서 얼마나 떨어졌나(m)
+function wallDist(edge, fp, plate) {
+  return { w: fp.x, e: plate.width - (fp.x + fp.w), s: fp.y, n: plate.depth - (fp.y + fp.d) }[edge];
+}
+
+function nearestWall(p, plate) {
+  const d = { w: p.x, e: plate.width - p.x, s: p.y, n: plate.depth - p.y };
+  return Object.keys(d).sort((a, b) => d[a] - d[b])[0];
 }
 
 function projectAlong(edge, point) {
