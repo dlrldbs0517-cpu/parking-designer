@@ -1,11 +1,14 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=255";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=255";
-import { drawThumb, mountPlan } from "./plan.js?v=255";
-import { stallRuleTargets } from "./stallTypes.js?v=255";
-import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=255";
-import { lookupZoning, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=255";
-import { bindContextDialog, closeContext, openContext } from "./context.js?v=255";
-import { addCore, removeCore, applyVariant, setVariantOption, setCoreDoor, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=255";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=264";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=264";
+import { drawThumb, mountPlan } from "./plan.js?v=264";
+import { stallRuleTargets } from "./stallTypes.js?v=264";
+import { downloadBlob, drawSheet, printSheet, sheetSvg } from "./sheet.js?v=264";
+import { stateDxf } from "./dxf.js?v=264";
+import { lookupZoning, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=264";
+import { bindContextDialog, closeContext, openContext, showOutline } from "./context.js?v=264";
+import { openSketch } from "./sketch.js?v=264";
+import { normalizeOutline, outlineProblem, polygonArea, bboxOf, isOrthogonal } from "./outline.js?v=264";
+import { addCore, removeCore, applyVariant, setVariantOption, setCoreDoor, autoPlaceCore, currentStallRules, demandResult, emit, generatePlate, loadReference, parseSpans, placeOverlapExample, placeSplitExample, readyFor3d, issueGroups, rampFallback, removeSelection, selectCore, selectItem, selectedOpening, selectedRamp, setReveal, setStep, setTool, state, subscribe, summary, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState } from "./state.js?v=264";
 
 const $ = (id) => document.getElementById(id);
 const edgeName = { s: "남", n: "북", w: "서", e: "동" };
@@ -276,6 +279,11 @@ $("sheet-svg").addEventListener("click", () => {
   const svg = sheetSvg(state, { ...info, checkedOn: info.demand.checkedOn }, sheetFloor());
   downloadBlob("parking-plan.svg", new Blob([svg], { type: "image/svg+xml" }));
 });
+$("sheet-dxf").addEventListener("click", () => {
+  const info = summary();
+  const dxf = stateDxf(state, info);
+  downloadBlob("parking-plan.dxf", new Blob([dxf], { type: "application/dxf" }));
+});
 $("sheet-print").addEventListener("click", () => printSheet($("sheet")));
 $("floor-picker").addEventListener("click", (event) => {
   const floor = event.target.dataset.floor;
@@ -327,7 +335,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=255")
+    sceneMount = import("./scene.js?v=264")
       .then((module) => module.mountScene($("scene-root")))
       .catch((error) => {
         sceneMount = null;
@@ -432,7 +440,6 @@ function render() {
   $("entrance-mode").disabled = state.rampPlacement !== "external";
   if (document.activeElement !== $("entrance-mode")) $("entrance-mode").value = state.entranceMode;
   if (document.activeElement !== $("circulation")) $("circulation").value = state.circulation;
-  if (document.activeElement !== $("project-name")) $("project-name").value = state.demand.projectName;
 
   const info = summary();
   renderDemand(info);
@@ -461,8 +468,8 @@ function render() {
     const t = info.stallTargets;
     const mark = (have, need) => (need ? `${have}/${need}${have >= need ? "" : " ⚠"}` : `${have}`);
     rows.push(["장애인전용", mark(c.disabled, t.disabled)]);
-    if (t.extended) rows.push(["확장형 (30%)", mark(c.extended, t.extended)]);
-    if (t.eco) rows.push([`친환경차 (${Math.round((t.ecoRate || 0.05) * 100)}%)`, mark(c.eco || 0, t.eco)]);
+    if (t.extended) rows.push([`확장형 (30%) <span class="info" tabindex="0" title="확장형(2.6×5.2m)은 기둥 사이 칸 묶음의 양 끝, 즉 기둥 바로 옆 칸을 넓혀 만든다 → [확 일 확]. 기둥 옆은 문을 열 때 기둥에 걸려 가장 불편한 자리라 넓히는 효과가 크고, 기둥 사이 남는 폭을 쓰니 대수가 줄지 않는다. 그래서 한곳에 모이지 않고 기둥마다 흩어져 보인다. 평면에서는 굵은 초록 테두리.">ⓘ</span>`, `${mark(c.extended, t.extended)} · 기둥 옆 칸`]);
+    if (t.eco) rows.push([`전기차 (${Math.round((t.ecoRate || 0.05) * 100)}%)`, `${mark(c.eco || 0, t.eco)} · 충전기 표시`]);
     if (c.parallel) rows.push(["평행주차 (자투리)", `${c.parallel}칸`]);
   }
   $("plan-stats").innerHTML = statList(rows, 3);
@@ -670,7 +677,6 @@ function buildDemandForm() {
   $("region").innerHTML = Object.entries(housingAreaDivisor).map(([id, region]) => `<option value="${id}">${region.label}</option>`).join("");
   $("zone").value = state.demand.zone;
   $("region").value = state.demand.region;
-  $("project-name").value = state.demand.projectName;
   $("ordinance").value = String(state.demand.ordinance);
   $("area-per-stall").value = String(state.demand.areaPerStall);
   $("planned-floors").value = String(state.demand.plannedFloors);
@@ -682,7 +688,6 @@ function buildDemandForm() {
     state.demand.region = $("region").value;
     if (zoneChanged) renderUseList();
     showZoneCurrent();
-    state.demand.projectName = $("project-name").value;
     const ordinance = numberOr($("ordinance").value, 1);
     state.demand.ordinance = Math.min(1.5, Math.max(0.5, ordinance));
     $("ordinance").classList.toggle("bad", ordinance < 0.5 || ordinance > 1.5);
@@ -726,6 +731,8 @@ function buildDemandForm() {
     try {
       const r = await lookupZoning(address);
       state.demand.siteAddress = r.address;
+      // 프로젝트명 칸을 뺐으므로 도면 제목은 조회한 주소로(지번 표시 앞부분만)
+      if (!r.notFound && r.address) state.demand.projectName = String(r.address).split(" · ")[0];
       state.demand.siteZones = r.zones;
       if (r.notFound) {
         box.className = "zone-result warn";
@@ -763,8 +770,14 @@ function buildDemandForm() {
       box.innerHTML = `<p>${r.address}</p><ul>${lines}</ul>${multi}${areaLine}${accessLine}<p class="note">건폐율·용적률은 국토계획법 시행령 상한입니다. 실제 값은 시·군 조례로 더 낮을 수 있습니다.</p>`
         + `<p class="cx-open">주변 매스 보기 <button type="button" class="ghost tiny" data-cx="map">지도</button> <button type="button" class="ghost tiny" data-cx="2d">2D</button> <button type="button" class="ghost tiny" data-cx="3d">3D</button></p>`;
       box.querySelectorAll("[data-cx]").forEach((b) => b.addEventListener("click", () => openContext(r.point, site, b.dataset.cx, r.address, access)));
+      // 외곽 그리기용으로 조회 결과를 기억
+      state.demand.sitePoint = r.point;
+      state.demand.siteParcel = site;
+      state.demand.siteAccess = access;
       // 조건 단계에서는 오른쪽이 비어 있으니 조회하자마자 지도를 바로 띄운다(영역을 고른 뒤 2D/3D).
       openContext(r.point, site, "map", r.address, access);
+      showOutline(state.outlineGeo);
+      showOutlineState();
       // 선택칸 맞추기
       const hit = Object.entries(zoneFactors).find(([, z]) => r.zones.some((name) => squash(name) === squash(z.label)));
       if (hit) $("zone").value = hit[0];
@@ -797,7 +810,7 @@ function buildDemandForm() {
     showZoneCurrent();
   });
   $("site-address").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); lookup(); } });
-  ["zone", "region", "project-name", "ordinance", "area-per-stall", "planned-floors"].forEach((id) => {
+  ["zone", "region", "ordinance", "area-per-stall", "planned-floors"].forEach((id) => {
     $(id).addEventListener("input", read);
     $(id).addEventListener("change", read);
   });
@@ -1005,3 +1018,73 @@ document.querySelectorAll("#variant-options input[data-opt]").forEach((box) => {
     setTimeout(() => { state.optionBusy = false; setVariantOption(box.dataset.opt, on); }, 30);
   });
 });
+
+// ── 주차장 외곽(CAD처럼 그리기) ──
+function outlineText(pts) {
+  return (pts || []).map(([x, y]) => `${+x.toFixed(2)}, ${+y.toFixed(2)}`).join("\n");
+}
+function parseOutline(text) {
+  return String(text || "").split(/\n+/).map((line) => line.trim()).filter(Boolean)
+    .map((line) => line.split(/[,\s]+/).filter(Boolean).map(Number))
+    .filter((p) => p.length >= 2 && p.every(Number.isFinite)).map((p) => [p[0], p[1]]);
+}
+function showOutlineState() {
+  const has = !!state.outline;
+  fields.width.readOnly = has;
+  fields.depth.readOnly = has;
+  $("outline-rect").hidden = !has;
+  $("outline-coords").hidden = !has;
+  $("outline-draw").textContent = has ? "외곽 고치기" : "외곽 그리기 (CAD처럼)";
+  const note = $("outline-note");
+  note.className = "hint";
+  if (!has) { note.textContent = "지금은 아래 가로 × 세로 직사각형입니다. 모양이 다르면 외곽을 그리세요."; return; }
+  const b = bboxOf(state.outline);
+  note.textContent = `그린 외곽 · 넓이 ${Math.round(polygonArea(state.outline)).toLocaleString("ko-KR")}㎡ · 감싸는 사각형 ${b.w.toFixed(1)} × ${b.d.toFixed(1)}m · ${isOrthogonal(state.outline) ? "직각 모양" : "사선 있음(사선 옆은 빈 땅이 남을 수 있음)"}`;
+}
+function setOutline(pts, geo = null) {
+  const norm = normalizeOutline(pts);
+  const problem = outlineProblem(norm);
+  if (problem) { $("outline-note").textContent = problem; $("outline-note").className = "hint warn"; return false; }
+  state.outline = norm;
+  state.outlineGeo = geo;
+  const b = bboxOf(norm);
+  state.parkWidth = Math.round(b.w * 10) / 10;
+  state.parkDepth = Math.round(b.d * 10) / 10;
+  fields.width.value = String(state.parkWidth);
+  fields.depth.value = String(state.parkDepth);
+  $("outline-pts").value = outlineText(norm);
+  showOutline(state.outlineGeo);
+  showOutlineState();
+  render();
+  return true;
+}
+$("outline-rect").addEventListener("click", () => {
+  state.outline = null;
+  state.outlineGeo = null;
+  showOutline(null);
+  showOutlineState();
+  render();
+});
+$("outline-pts").addEventListener("change", () => {
+  const g = state.outlineGeo;
+  const pts = parseOutline($("outline-pts").value);
+  // 숫자로 고쳐도 대지 위 위치는 왼쪽 아래 점 기준으로 유지
+  let geo = null;
+  if (g) {
+    const minX = Math.min(...g.pts.map((p) => p[0]));
+    const minY = Math.min(...g.pts.map((p) => p[1]));
+    const n = normalizeOutline(pts);
+    geo = { center: g.center, pts: n.map(([x, y]) => [x + minX, y + minY]) };
+  }
+  setOutline(pts, geo);
+});
+$("outline-draw").addEventListener("click", () => {
+  const center = state.demand.sitePoint || null;
+  openSketch({
+    site: center ? state.demand.siteParcel : null,
+    center,
+    start: state.outline ? { pts: state.outline, geo: state.outlineGeo } : null,
+    onDone: (pts, geo) => setOutline(pts, geo),
+  });
+});
+showOutlineState();

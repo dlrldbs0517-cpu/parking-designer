@@ -1,4 +1,5 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=255";
+import { outlineProblem, bboxOf } from "./outline.js?v=264";
+import { calculateDemand, emptyDemand } from "./demand.js?v=264";
 import {
   basementCount,
   clampCore,
@@ -15,7 +16,7 @@ import {
   referenceCase,
   searchPlacement,
   snapCore,
-} from "./layout.js?v=255";
+} from "./layout.js?v=264";
 
 export const state = {
   step: 1,
@@ -25,6 +26,9 @@ export const state = {
   resultTab: "model",
   parkWidth: 48,
   parkDepth: 42,
+  // 주차장 외곽 다각형(직사각형이 아닐 때). [[x,y],...] m, 왼쪽 아래 = 0,0. null이면 직사각형.
+  outline: null,
+  outlineGeo: null,   // 대지 위에 그린 원본 { center: 경위도, pts: 중심 기준 m } (2D에 다시 보여 주기용)
   columnSpacing: 8.1,
   columnWidth: 0.5,
   columnDepth: 0.5,
@@ -100,7 +104,14 @@ export function emit() {
 }
 
 export function plateFromState() {
+  const poly = state.outline && !outlineProblem(state.outline) ? state.outline : null;
+  if (poly) {
+    const b = bboxOf(poly);
+    state.parkWidth = round1(b.w);
+    state.parkDepth = round1(b.d);
+  }
   return {
+    outline: poly,
     width: round1(state.parkWidth),
     depth: round1(state.parkDepth),
     spacing: round1(state.columnSpacing),

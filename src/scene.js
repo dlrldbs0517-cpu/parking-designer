@@ -1,9 +1,11 @@
+import { outlineProblem } from "./outline.js?v=264";
+import { chargerRect } from "./stallMarks.js?v=264";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=255";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=264";
 // 층고는 입력값(state.plate.floorHeight)을 쓴다
 const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
-import { state, subscribe, summary } from "./state.js?v=255";
+import { state, subscribe, summary } from "./state.js?v=264";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -177,11 +179,9 @@ function standard(color, roughness, map) {
 
 function addSlab(plate, base, material) {
   const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.lineTo(plate.width, 0);
-  shape.lineTo(plate.width, plate.depth);
-  shape.lineTo(0, plate.depth);
-  shape.lineTo(0, 0);
+  const outline = plate.outline && !outlineProblem(plate.outline) ? plate.outline : [[0, 0], [plate.width, 0], [plate.width, plate.depth], [0, plate.depth]];
+  outline.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+  shape.lineTo(outline[0][0], outline[0][1]);
   curvedRampHoles(plate).forEach((poly) => {
     const path = new THREE.Path();
     poly.forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y)));
@@ -372,6 +372,36 @@ function addWalls(material, base) {
   state.openings.concat(state.ramps).forEach((item) => {
     cuts[item.edge].push({ start: item.t - item.width / 2, end: item.t + item.width / 2 });
   });
+  if (plate.outline && !outlineProblem(plate.outline)) {
+    // 외곽 다각형: 변마다 벽. 감싸는 직사각형 변 위에 놓인 변은 출입구·램프 자리를 비운다.
+    const pts = plate.outline;
+    pts.forEach((p, i) => {
+      const q = pts[(i + 1) % pts.length];
+      const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (len < 0.05) return;
+      const onEdge = Math.abs(p[1]) < 0.01 && Math.abs(q[1]) < 0.01 ? "s" : Math.abs(p[1] - plate.depth) < 0.01 && Math.abs(q[1] - plate.depth) < 0.01 ? "n"
+        : Math.abs(p[0]) < 0.01 && Math.abs(q[0]) < 0.01 ? "w" : Math.abs(p[0] - plate.width) < 0.01 && Math.abs(q[0] - plate.width) < 0.01 ? "e" : null;
+      if (onEdge) {
+        const horizontal = onEdge === "s" || onEdge === "n";
+        const a0 = horizontal ? Math.min(p[0], q[0]) : Math.min(p[1], q[1]);
+        const a1 = horizontal ? Math.max(p[0], q[0]) : Math.max(p[1], q[1]);
+        segments(a1 - a0, cuts[onEdge].map((c) => ({ start: c.start - a0, end: c.end - a0 }))).forEach(([a, b]) => {
+          const m = a0 + (a + b) / 2;
+          if (onEdge === "s") wallBox(m, base, 0.12, b - a, 0.24, material, 1.15);
+          if (onEdge === "n") wallBox(m, base, plate.depth - 0.12, b - a, 0.24, material, 1.15);
+          if (onEdge === "w") wallBox(0.12, base, m, 0.24, b - a, material, 1.15);
+          if (onEdge === "e") wallBox(plate.width - 0.12, base, m, 0.24, b - a, material, 1.15);
+        });
+        return;
+      }
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(len, 1.15, 0.24), material);
+      wall.position.set((p[0] + q[0]) / 2, base + 0.575, (p[1] + q[1]) / 2);
+      wall.rotation.y = -Math.atan2(q[1] - p[1], q[0] - p[0]);
+      wall.castShadow = true;
+      host.add(wall);
+    });
+    return;
+  }
   segments(plate.width, cuts.s).forEach(([a, b]) => wallBox((a + b) / 2, base, 0.12, b - a, 0.24, material, 1.15));
   segments(plate.width, cuts.n).forEach(([a, b]) => wallBox((a + b) / 2, base, plate.depth - 0.12, b - a, 0.24, material, 1.15));
   segments(plate.depth, cuts.w).forEach(([a, b]) => wallBox(0.12, base, (a + b) / 2, 0.24, b - a, material, 1.15));
@@ -476,12 +506,28 @@ function stallMaterial(stall, fallback) {
   return fallback;
 }
 
+let chargerBody = null;
+let chargerPanel = null;
+function chargerMat() { if (!chargerBody) chargerBody = standard("#2b2a28", 0.5); return chargerBody; }
+function chargerPanelMat() { if (!chargerPanel) chargerPanel = standard("#f2c230", 0.4); return chargerPanel; }
+
 function addStallPads(base, material) {
   state.stalls.forEach((stall) => {
     const pad = new THREE.Mesh(new THREE.BoxGeometry(stall.w - 0.04, 0.02, stall.d - 0.04), stallMaterial(stall, material));
     pad.position.set(stall.x + stall.w / 2, base + 0.03, stall.y + stall.d / 2);
     pad.receiveShadow = true;
     host.add(pad);
+    if (stall.eco) {
+      // 전기차 충전기: 칸 뒤쪽 가운데, 높이 1.4m 기둥형(짙은 몸체 + 노란 화면)
+      const r = chargerRect(stall);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(r.w, 1.4, r.d), chargerMat());
+      body.position.set(r.x + r.w / 2, base + 0.7, r.y + r.d / 2);
+      body.castShadow = true;
+      host.add(body);
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(r.w * 0.7 + 0.02, 0.35, r.d * 0.7 + 0.02), chargerPanelMat());
+      panel.position.set(r.x + r.w / 2, base + 1.1, r.y + r.d / 2);
+      host.add(panel);
+    }
   });
   if (!state.debugColumns) return;
   const alert = standard("#b42318", 0.35);

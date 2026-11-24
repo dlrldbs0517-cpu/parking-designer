@@ -1,5 +1,7 @@
-import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=255";
-import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=255";
+import { outlineProblem } from "./outline.js?v=264";
+import { chargerRect, boltPoints, stallTag } from "./stallMarks.js?v=264";
+import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=264";
+import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=264";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -75,8 +77,20 @@ export function mountPlan(canvas) {
 
   const paint = (ctx) => {
     const plate = state.plate;
-    ctx.fillStyle = "#fbfaf7";
-    ctx.fillRect(0, 0, plate.width, plate.depth);
+    const outline = validOutline(plate);
+    if (outline) {
+      // 외곽 다각형: 감싸는 직사각형 중 바깥은 회색 빗금(못 쓰는 땅), 안쪽만 흰 바닥
+      ctx.fillStyle = "#e4dfd6";
+      ctx.fillRect(0, 0, plate.width, plate.depth);
+      ctx.fillStyle = "#fbfaf7";
+      ctx.beginPath();
+      outline.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#fbfaf7";
+      ctx.fillRect(0, 0, plate.width, plate.depth);
+    }
 
     drawOverlay(ctx, plate);
     drawSite(ctx, plate);
@@ -95,11 +109,20 @@ export function mountPlan(canvas) {
       ctx.lineWidth = 1 / camera.scale;
       ctx.fillRect(stall.x, stall.y, stall.w, stall.d);
       ctx.strokeRect(stall.x, stall.y, stall.w, stall.d);
+      // 확장형(2.6m)은 일반형(2.5m)과 폭 차이가 0.1m뿐이라 눈에 안 띈다 → 굵은 초록 테두리 + 폭 치수로 구분
+      if (stall.type === "extended") {
+        ctx.strokeStyle = "#2f7a3e";
+        ctx.lineWidth = 2.4 / camera.scale;
+        const inset = 1.2 / camera.scale;
+        ctx.strokeRect(stall.x + inset, stall.y + inset, stall.w - 2 * inset, stall.d - 2 * inset);
+      }
       ctx.strokeStyle = "#3e6b4e";
       ctx.lineWidth = 1.6 / camera.scale;
       aisleMark(ctx, stall);
+      if (stall.eco) drawCharger(ctx, stall);
       const tag = stallTag(stall);
       if (tag && camera.scale > 6) label(ctx, tag, stall.x + stall.w / 2, stall.y + stall.d / 2, "#1f3a5f");
+      if (stall.type === "extended" && camera.scale > 14) smallLabel(ctx, `${Math.min(stall.w, stall.d).toFixed(1)}m`, stall, "#2f7a3e");
     });
     if (state.debugColumns) {
       (state.columnConflicts || []).forEach((stall) => {
@@ -181,7 +204,12 @@ export function mountPlan(canvas) {
     ctx.strokeStyle = "#1e1a16";
     ctx.lineWidth = 2 / camera.scale;
     if (external) ctx.setLineDash([0.6, 0.45]);
-    ctx.strokeRect(0, 0, plate.width, plate.depth);
+    if (outline) {
+      ctx.beginPath();
+      outline.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.stroke();
+    } else ctx.strokeRect(0, 0, plate.width, plate.depth);
     ctx.restore();
 
     const blockedOpenings = new Set(state.issues.filter((issue) => issue.type === "opening").map((issue) => issue.id));
@@ -420,12 +448,34 @@ function stallFill(stall) {
   return "#f7f4ee";
 }
 
-function stallTag(stall) {
-  if (stall.type === "disabled") return "장";
-  if (stall.type === "parallel") return "평행";
-  if (stall.eco) return stall.type === "extended" ? "확친" : "친";
-  if (stall.type === "extended") return "확";
-  return "";
+// 전기차 충전기: 칸 뒤쪽 가운데 짙은 상자 + 노란 번개
+function drawCharger(ctx, stall) {
+  const r = chargerRect(stall);
+  ctx.save();
+  ctx.fillStyle = "#2b2a28";
+  ctx.fillRect(r.x, r.y, r.w, r.d);
+  ctx.strokeStyle = "#f2c230";
+  ctx.lineWidth = 1.4 / camera.scale;
+  ctx.beginPath();
+  boltPoints(r).forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 칸 폭 치수(확장형): 칸 앞쪽(차로 쪽) 가장자리 안에 작게
+function smallLabel(ctx, text, stall, color) {
+  const a = stall.aisle;
+  const x = a === "e" ? stall.x + stall.w - 0.6 : a === "w" ? stall.x + 0.6 : stall.x + stall.w / 2;
+  const y = a === "n" ? stall.y + stall.d - 0.5 : a === "s" ? stall.y + 0.5 : stall.y + stall.d / 2;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1, -1);
+  ctx.fillStyle = color;
+  ctx.font = `${10 / camera.scale}px Segoe UI, Malgun Gothic, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
 }
 
 // 카스토퍼(차막이): 차로 반대쪽(뒤쪽) 벽에서 0.9m 안쪽, 가운데 1.6m
@@ -665,4 +715,8 @@ function paintNorth(ctx, rect) {
 // 내부 램프와 묶인 출입구는 벽에 표시하지 않는다(차는 벽이 아니라 램프로 드나든다).
 function visibleOpenings() {
   return state.openings.filter((opening) => !(opening.linkedRamp && state.ramps.some((ramp) => ramp.id === opening.linkedRamp && (ramp.placement || "internal") !== "external")));
+}
+
+function validOutline(plate) {
+  return plate && plate.outline && !outlineProblem(plate.outline) ? plate.outline : null;
 }

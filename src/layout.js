@@ -1,4 +1,5 @@
-import { assignStallTypes, tallyStallTypes, stallRuleTargets, walkField, entryOf } from "./stallTypes.js?v=255";
+import { outlineVoids, growRect, polygonArea, outlineProblem, insidePolygon } from "./outline.js?v=264";
+import { assignStallTypes, tallyStallTypes, stallRuleTargets, walkField, entryOf } from "./stallTypes.js?v=264";
 
 /**
  * 주차장법 시행규칙 제3조·제6조. 확인 2026-11-08. law.go.kr
@@ -481,9 +482,14 @@ function pushOutOf(core, box, plate, lines) {
     const ny = core.ny || 1;
     let best = null;
     for (let i = 0; i + nx < lines.gx.length; i += 1) for (let j = 0; j + ny < lines.gy.length; j += 1) {
-      const c = { ...core, x: lines.gx[i], y: lines.gy[j], w: round3(lines.gx[i + nx] - lines.gx[i]), d: round3(lines.gy[j + ny] - lines.gy[j]) };
-      if (c.w < nx * plate.spacing * 0.75 || c.d < ny * plate.spacing * 0.75) continue;
+      // 기둥 격자 먼저 방식은 칸 간격이 달라 코어 크기는 그대로 두고 자리만 격자선에 맞춘다
+      const keepSize = plate.moduleGrid !== false && plate.gridFirst !== false;
+      const c = keepSize ? { ...core, x: lines.gx[i], y: lines.gy[j] }
+        : { ...core, x: lines.gx[i], y: lines.gy[j], w: round3(lines.gx[i + nx] - lines.gx[i]), d: round3(lines.gy[j + ny] - lines.gy[j]) };
+      if (!keepSize && (c.w < nx * plate.spacing * 0.75 || c.d < ny * plate.spacing * 0.75)) continue;
+      if (c.x + c.w > plate.width + 1e-6 || c.y + c.d > plate.depth + 1e-6) continue;
       if (overlapArea(c, box) > 0.01) continue;
+      if ((plate.voids || []).some((v) => overlapArea(c, v) > 0.01)) continue;
       if (c.x < ring - 0.3 || c.y < ring - 0.3 || c.x + c.w > plate.width - ring + 0.3 || c.y + c.d > plate.depth - ring + 0.3) continue;
       const dist = Math.hypot(c.x - core.x, c.y - core.y);
       if (!best || dist < best.dist) best = { c, dist };
@@ -1233,6 +1239,12 @@ function layoutCore(input) {
     const again = snapToLines(pushed, gridLines, plate);
     return overlapArea(again, rampBox) < 0.01 ? again : pushed;
   });
+  // 외곽 다각형 바깥(못 쓰는 곳)에 걸친 코어는 안쪽으로 민다
+  (plate.voids || []).forEach((v) => {
+    cores.forEach((core, i) => {
+      if (overlapArea(core, v) > 0.01) cores[i] = pushOutOf(core, v, plate, gridLines);
+    });
+  });
   // 코어가 램프(도착 앞 6m 포함)와 겹쳐 옆으로 밀렸으면 알림으로 남긴다(배치는 정상 진행).
   const movedCores = cores.map((core, i) => (Math.abs(core.x - coresIn[i].x) > 0.05 || Math.abs(core.y - coresIn[i].y) > 0.05 ? i : -1)).filter((i) => i >= 0);
 
@@ -1246,6 +1258,10 @@ function layoutCore(input) {
   if ((ramp.placement || "internal") === "internal") {
     aisles = aisles.flatMap((aisle) => rampPieces.reduce((parts, piece) => parts.flatMap((part) => cutBlock(part, piece, "internal")), [aisle]));
   }
+  // 외곽 바깥(못 쓰는 곳)에 걸친 차로는 잘라 낸다(끊긴 동선은 뒤에서 우회 차로로 잇는다)
+  (plate.blockRects || []).forEach((b) => {
+    aisles = aisles.flatMap((aisle) => cutBlock(aisle, b, "void"));
+  });
   const approaches = [].concat(approachAisle(ramp, plate), rampEntryAisle(ramp, plate) || []);
   // 도착 자리 안에 완전히 들어가는 차로 조각은 도착 자리와 같은 공간이므로 지운다.
   aisles = aisles.filter((aisle) => !approaches.some((approach) => aisle.x >= approach.x - 0.01 && aisle.y >= approach.y - 0.01
@@ -1628,7 +1644,24 @@ function layoutCore(input) {
   });
   // 코어 옆 자투리 차로 정리(2026-11-21): 코어 옆에 붙은 차로 조각이 코어 면 선보다 3m 안쪽으로 삐져나와 있고
   // 그 띠가 동선·칸 출입에 안 쓰이면 띠를 차로에서 빼서 차로 가장자리를 코어 면에 맞춘다.
+  if ((plate.voids || []).length) {
+    aisles = aisles.flatMap((a) => plate.voids.reduce((parts, v) => parts.flatMap((part) => (overlapArea(part, v) > 0.04 ? subtractRect(part, v).filter((q) => q.w > 0.3 && q.d > 0.3).map((q) => ({ ...part, ...q })) : [part])), [a]));
+  }
   aisles = trimCorePockets(aisles, cores, stalls, plate, columns.concat(internal ? rampPieces : [], openings.map((opening) => mouthRect(opening, plate))));
+  // 차로 가장자리 한 줄로(2026-11-24): 이웃 차로 조각이나 코어 면이 0.6m 안 바깥에 있으면 그 선까지 차로를 넓혀
+  // 계단·흰 틈을 없앤다. 그 띠에 칸이 걸리면 칸을 같이 밀어낸다(밀 자리가 없으면 그 조각은 그대로).
+  {
+    const solids = columns.concat(internal ? rampPieces : [], openings.map((opening) => mouthRect(opening, plate)));
+    // 칸 줄 앞선 맞추기: 같은 차로를 보는 이웃 칸끼리 앞선이 0.6m 안으로 어긋나 있으면 차로에서 먼 쪽 선으로 물린다.
+    const before = stalls.map((st) => ({ st, x: st.x, y: st.y }));
+    const movedRows = alignStallRows(stalls, aisles, cores, solids, plate);
+    const straight = straightenAisleEdges(aisles, stalls, cores, solids, plate);
+    // 물린 칸 앞이 차로와 안 맞닿으면(차로를 못 넓힌 경우) 되돌린다
+    if (movedRows.length && movedRows.some((st) => !stallReachable(st, straight))) {
+      before.forEach((b) => { b.st.x = b.x; b.st.y = b.y; });
+      aisles = straightenAisleEdges(aisles, stalls, cores, solids, plate);
+    } else aisles = straight;
+  }
   const adj = buildGraph(aisles);
   const issues = [];
   issues.push(...portalIssues(aisles, openings, [ramp], plate));
@@ -1671,6 +1704,12 @@ function layoutCore(input) {
     issues.push({ type: "rampoffset", label: "램프가 외벽에서 떨어져 있어 지상 도로와 바로 이어지지 않습니다(층간 램프로 보고 배치)." });
   }
   movedCores.forEach((i) => issues.push({ type: "notice", label: `${cores.length > 1 ? `코어 ${i + 1}` : "코어"}가 램프(도착 앞 6m 포함)와 겹쳐 옆으로 옮겼습니다.` }));
+  // 외곽 다각형: 램프·코어가 외곽 밖(못 쓰는 곳)에 걸치면 불가
+  if ((plate.voids || []).length) {
+    const rampOut = internal && rampPieces.some((piece) => plate.voids.some((v) => overlapArea(piece, v) > 0.05));
+    if (rampOut) issues.push({ type: "site", label: "램프가 주차장 외곽 밖으로 나갑니다. 램프를 외곽 안으로 옮기거나 도로변·위치를 바꿔 주세요." });
+    if (cores.some((c) => plate.voids.some((v) => overlapArea(c, v) > 0.05))) issues.push({ type: "site", label: "코어가 주차장 외곽 밖에 걸칩니다. 코어를 안쪽으로 옮겨 주세요." });
+  }
   const connected = !issues.some((issue) => issue.type === "opening" || issue.type === "ramp" || issue.type === "network");
   const slopeOk = !issues.some((issue) => issue.type === "slope");
   const siteOk = !issues.some((issue) => issue.type === "site");
@@ -1768,6 +1807,8 @@ function normalizePlate(plate) {
     inner: !!plate.inner,
     moduleGrid: plate.moduleGrid,
     blockRects: plate.blockRects,
+    outline: plate.outline || null,
+    voids: plate.voids || null,
     extraAisles: plate.extraAisles,
     wallColumns: plate.wallColumns,
     roadEdge: plate.roadEdge || null,
@@ -2972,7 +3013,14 @@ function buildGraph(aisles) {
   const adj = aisles.map(() => []);
   for (let i = 0; i < aisles.length; i += 1) {
     for (let j = i + 1; j < aisles.length; j += 1) {
-      if (contactLength(aisles[i], aisles[j]) < AISLE_MIN) continue;
+      // 가장자리 맞춤 띠(trim)는 옆 차로의 일부라 조금만 닿아도 이어진 것으로 본다
+      if (aisles[i].role === "trim" || aisles[j].role === "trim") {
+        const a = aisles[i];
+        const b = aisles[j];
+        const ox = overlapAmount(a.x, a.x + a.w, b.x, b.x + b.w);
+        const oy = overlapAmount(a.y, a.y + a.d, b.y, b.y + b.d);
+        if (!((ox >= 0.3 && oy >= -0.02) || (oy >= 0.3 && ox >= -0.02))) continue;
+      } else if (contactLength(aisles[i], aisles[j]) < AISLE_MIN) continue;
       adj[i].push(j);
       adj[j].push(i);
     }
@@ -3300,11 +3348,23 @@ function shiftDeep(v, dx, dy, along) {
   return out;
 }
 
+// 외곽 다각형이 있으면 바깥 부분을 못 쓰는 곳(blockRects)으로. c = 외벽 여유 띠(그만큼 안쪽으로 더 막음)
+function withOutlineBlocks(plate, raw, c) {
+  if (!raw.outline || outlineProblem(raw.outline)) return plate;
+  const voids = outlineVoids(raw.outline, raw.width, raw.depth)
+    .map((r) => growRect(r, c, raw.width, raw.depth))
+    .map((r) => ({ ...r, x: round3(r.x - c), y: round3(r.y - c) }))
+    .map((r) => clipRect(r, plate))
+    .filter((r) => r && r.w > 0.05 && r.d > 0.05)
+    .map((r) => ({ ...r, void: true }));
+  return { ...plate, blockRects: (plate.blockRects || []).concat(voids), voids };
+}
+
 function layoutWithGap(input) {
   const raw = input.plate || input;
   const c = edgeGap(raw);
-  if (!c) return layoutParkingInner(input);
-  const plate = innerPlateOf(raw, c);
+  if (!c) return layoutParkingInner(raw.outline ? { ...input, plate: withOutlineBlocks(raw, raw, 0) } : input);
+  const plate = withOutlineBlocks(innerPlateOf(raw, c), raw, c);
   const alongOf = (edge) => (edge === "n" || edge === "s" ? plate.width : plate.depth);
   const inEdge = (item) => (item && item.edge ? { ...item, t: round3(clamp(item.t - c, (item.width || 0) / 2, alongOf(item.edge) - (item.width || 0) / 2)) } : item);
   const inner = {
@@ -3323,14 +3383,23 @@ function layoutWithGap(input) {
   const outEdge = (item) => (item && item.edge ? { ...item, t: round3(item.t + c) } : item);
   out.ramps = (res.ramps || []).map(outEdge);
   out.openings = (res.openings || []).map(outEdge);
-  out.plate = { ...res.plate, inner: false, width: raw.width, depth: raw.depth, edgeGap: c };
-  // ㎡/대·차로비는 진짜 평면 넓이 기준으로
-  const f = (raw.width * raw.depth) / (plate.width * plate.depth);
+  out.plate = { ...res.plate, inner: false, width: raw.width, depth: raw.depth, edgeGap: c, outline: raw.outline || null, voids: (plate.voids || []).map((r) => ({ ...r, x: round3(r.x + c), y: round3(r.y + c) })) };
+  // ㎡/대·차로비는 진짜 평면 넓이 기준으로(외곽 다각형이면 그 넓이)
+  const realArea = raw.outline && !outlineProblem(raw.outline) ? polygonArea(raw.outline) : raw.width * raw.depth;
+  const f = realArea / (plate.width * plate.depth);
   if (res.metrics) out.metrics = { ...res.metrics, areaPerStall: round2m(res.metrics.areaPerStall * f), aisleRatio: round3(res.metrics.aisleRatio / f) };
   // 출입구(외부형 램프·지상 입구)에서 바깥 벽까지 c 띠를 차로로 잇는다.
   out.aisles = out.aisles.map((a) => extendToWall(a, out.openings, raw, c));
   // 출입구 앞에서 벽까지 이은 차로와 겹치는 외곽 띠 기둥은 뺀다(출입 통로를 막지 않게).
   out.columns = (out.columns || []).filter((col) => !out.aisles.some((a) => overlapArea(col, a) > 0.01));
+  // 외곽 다각형 바깥에 선 기둥은 뺀다(꺾인 벽 위 기둥은 남김)
+  if (raw.outline && !outlineProblem(raw.outline)) {
+    out.columns = out.columns.filter((col) => {
+      const cx = col.x + col.w / 2;
+      const cy = col.y + col.d / 2;
+      return insidePolygon(raw.outline, cx, cy) || [[0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]].some(([dx, dy]) => insidePolygon(raw.outline, cx + dx, cy + dy));
+    });
+  }
   return out;
 }
 
@@ -3450,6 +3519,124 @@ function alignParallelRows(extra, blocks, plate, aisles) {
     if (!moved) break;
   }
   return { stalls: out, aisles: added };
+}
+
+// 칸 줄 앞선 맞추기(2026-11-24). 같은 쪽 차로를 보는 직각 칸이 길이 방향으로 1m 안에 이웃해 있고 앞선이 0.05~0.6m 어긋나면
+// 묶어서 차로에서 가장 먼 앞선에 맞춘다(튀어나온 칸을 뒤로 물림). 옮길 자리가 막혀 있으면 그 칸은 그대로. 옮긴 칸 목록을 돌려준다.
+function alignStallRows(stalls, aisles, cores, solids, plate) {
+  const perp = stalls.filter((st) => st.type !== "parallel" && st.aisle);
+  const frontOf = (st) => (st.aisle === "n" ? st.y + st.d : st.aisle === "s" ? st.y : st.aisle === "e" ? st.x + st.w : st.x);
+  const along = (st) => (st.aisle === "n" || st.aisle === "s" ? [st.x, st.x + st.w] : [st.y, st.y + st.d]);
+  const away = (st) => (st.aisle === "n" || st.aisle === "e" ? -1 : 1);   // 차로에서 멀어지는 방향(앞선 좌표 기준)
+  // 이웃 관계로 묶기
+  const parent = perp.map((_, i) => i);
+  const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  perp.forEach((p, i) => perp.forEach((q, j) => {
+    if (j <= i || p.aisle !== q.aisle) return;
+    const [a0, a1] = along(p);
+    const [b0, b1] = along(q);
+    const gap = Math.max(b0 - a1, a0 - b1);
+    if (gap > 1.0) return;
+    if (Math.abs(frontOf(p) - frontOf(q)) > 0.6) return;
+    parent[find(i)] = find(j);
+  }));
+  const groups = new Map();
+  perp.forEach((st, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(st); });
+  const moved = [];
+  groups.forEach((row) => {
+    if (row.length < 2) return;
+    const fronts = row.map(frontOf);
+    const target = away(row[0]) > 0 ? Math.max(...fronts) : Math.min(...fronts);
+    row.forEach((st) => {
+      const shift = target - frontOf(st);
+      if (Math.abs(shift) < 0.05) return;
+      const vertical = st.aisle === "n" || st.aisle === "s";
+      const r = { ...st, x: round3(st.x + (vertical ? 0 : shift)), y: round3(st.y + (vertical ? shift : 0)) };
+      if (r.x < -0.01 || r.y < -0.01 || r.x + r.w > plate.width + 0.01 || r.y + r.d > plate.depth + 0.01) return;
+      if (stalls.some((q) => q !== st && overlapArea(r, q) > 0.001)) return;
+      if (solids.concat(cores, aisles).some((b) => overlapArea(r, b) > 0.001)) return;
+      st.x = r.x;
+      st.y = r.y;
+      moved.push(st);
+    });
+  });
+  return moved;
+}
+
+function straightenAisleEdges(aisles, stalls, cores, solids, plate) {
+  let current = aisles.slice();
+  const groups = componentGroups(current).length;
+  const edgeOf = (r, side) => (side === "s" ? r.y : side === "n" ? r.y + r.d : side === "w" ? r.x : r.x + r.w);
+  const spanOf = (r, side) => (side === "s" || side === "n" ? [r.x, r.x + r.w] : [r.y, r.y + r.d]);
+  const out = (side) => (side === "s" || side === "w" ? -1 : 1);   // 바깥쪽 방향
+  const opposite = { s: "n", n: "s", w: "e", e: "w" };
+  const inPlate = (r) => r.x >= -0.01 && r.y >= -0.01 && r.x + r.w <= plate.width + 0.01 && r.y + r.d <= plate.depth + 0.01;
+  const covered = (r) => current.some((b) => overlapArea(r, b) >= r.w * r.d - 0.001);
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false;
+    const snapshot = current.slice();
+    snapshot.forEach((a) => {
+      if (a.role === "trim") return;
+      const sides = a.w >= a.d ? ["s", "n"] : ["w", "e"];
+      sides.forEach((side) => {
+        const e = edgeOf(a, side);
+        const [lo, hi] = spanOf(a, side);
+        // 기준선: 바깥 0.05~0.6m 안의 이웃 차로 같은 쪽 가장자리, 또는 코어의 마주 보는 면. 그 기준이 있는 구간만 채운다.
+        const sources = [];
+        snapshot.forEach((b) => { if (b !== a) sources.push({ v: edgeOf(b, side), span: spanOf(b, side), from: "aisle" }); });
+        cores.forEach((c) => sources.push({ v: edgeOf(c, opposite[side]), span: spanOf(c, side), from: "core" }));
+        // 이 차로를 보는 칸의 앞선(칸 줄을 맞춘 뒤 차로와 사이가 뜬 경우)
+        stalls.forEach((st) => { if (st.type !== "parallel" && st.aisle === opposite[side]) sources.push({ v: edgeOf(st, opposite[side]), span: spanOf(st, side), from: "stall" }); });
+        // 기준선이 정해지면 이 차로의 나머지 구간(기둥·코어·램프로 끊긴 구간마다)도 같은 선까지 맞춰 본다 → 한 줄로
+        const lineVals = [...new Set(sources.map((src) => round3(src.v)).filter((v) => { const d = (v - e) * out(side); return d > 0.05 && d <= 0.6; }))];
+        lineVals.forEach((v) => {
+          const gap = Math.abs(v - e);
+          const band = side === "s" ? { x: lo, y: v, w: hi - lo, d: gap } : side === "n" ? { x: lo, y: e, w: hi - lo, d: gap }
+            : side === "w" ? { x: v, y: lo, w: gap, d: hi - lo } : { x: e, y: lo, w: gap, d: hi - lo };
+          const cuts = solids.concat(cores).filter((b) => overlapArea(band, b) > 0.001).map((b) => spanOf(b, side)).sort((p, q) => p[0] - q[0]);
+          let at = lo;
+          cuts.concat([[hi, hi]]).forEach(([c0, c1]) => {
+            if (c0 - at >= 0.3) sources.push({ v, span: [at, Math.min(c0, hi)], from: "line" });
+            at = Math.max(at, c1);
+          });
+        });
+        sources.forEach((src) => {
+          const d = (src.v - e) * out(side);
+          if (d <= 0.05 || d > 0.6) return;
+          const s0 = Math.max(lo, src.span[0]);
+          const s1 = Math.min(hi, src.span[1]);
+          if (s1 - s0 < 0.3) return;
+          const gap = Math.abs(src.v - e);
+          const strip = side === "s" ? { x: s0, y: src.v, w: s1 - s0, d: gap }
+            : side === "n" ? { x: s0, y: e, w: s1 - s0, d: gap }
+            : side === "w" ? { x: src.v, y: s0, w: gap, d: s1 - s0 }
+            : { x: e, y: s0, w: gap, d: s1 - s0 };
+          const r0 = { ...strip, x: round3(strip.x), y: round3(strip.y), w: round3(strip.w), d: round3(strip.d) };
+          if (!inPlate(r0) || covered(r0)) return;
+          if (solids.concat(cores).some((b) => overlapArea(r0, b) > 0.001)) return;
+          // 띠에 걸린 칸은 바깥으로 밀어 본다
+          const hit = stalls.filter((st) => overlapArea(r0, st) > 0.001);
+          const moved = new Map();
+          for (const st of hit) {
+            const push = side === "s" ? st.y + st.d - r0.y : side === "n" ? r0.y + r0.d - st.y : side === "w" ? st.x + st.w - r0.x : r0.x + r0.w - st.x;
+            const r = { ...st, x: round3(st.x + (side === "w" ? -push : side === "e" ? push : 0)), y: round3(st.y + (side === "s" ? -push : side === "n" ? push : 0)) };
+            if (!inPlate(r)) return;
+            if (stalls.some((q) => q !== st && !hit.includes(q) && overlapArea(r, q) > 0.001)) return;
+            if (solids.concat(cores).some((b) => overlapArea(r, b) > 0.001) || current.some((b) => overlapArea(r, b) > 0.001)) return;
+            moved.set(st, r);
+          }
+          const trial = current.concat([{ ...r0, role: "trim", phase: "loop", portals: [] }]);
+          const trialStalls = stalls.map((st) => moved.get(st) || st);
+          if (componentGroups(trial).length > groups || !trialStalls.every((st) => stallReachable(st, trial))) return;
+          moved.forEach((r, st) => Object.assign(st, { x: r.x, y: r.y }));
+          current = trial;
+          changed = true;
+        });
+      });
+    });
+    if (!changed) break;
+  }
+  return current;
 }
 
 function trimCorePockets(aisles, cores, stalls, plate, solids = []) {
@@ -3768,7 +3955,7 @@ function enforceMaxSpan({ plate, gridX, gridY, columns, stalls, aisles, cores, r
   const W = plate.width;
   const D = plate.depth;
   const hard = aisles.concat(ramps, cores, mouths);
-  const solid = cores.concat(ramps);
+  const solid = cores.concat(ramps, plate.voids || []);   // 외곽 다각형의 꺾인 벽도 받침
   const long = [];
   let removed = 0;
   let added = 0;

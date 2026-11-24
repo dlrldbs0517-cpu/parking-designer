@@ -485,3 +485,32 @@ select:disabled { background: #efebe3; color: #333; opacity: 1; }
 .variant-options[hidden] { display: none; }
 #plan-view > #plan { grid-row: 4; }
 .variant-options .option-note { flex-basis: 100%; color: #8a5a14; }
+.cx-draw { fill: none; stroke: #1f6fb2; stroke-width: 0.6; stroke-dasharray: 2 1; vector-effect: non-scaling-stroke; }
+.cx-draw-pt { fill: #1f6fb2; }
+.cx-draw-pt.first { fill: #fff; stroke: #1f6fb2; stroke-width: 0.5; }
+.cx-draw-len { font-size: 3px; fill: #1f6fb2; paint-order: stroke; stroke: #fff; stroke-width: 0.6px; }
+.cx-outline-poly { fill: rgba(31, 111, 178, 0.12); stroke: #1f6fb2; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.cx-draw { stroke-width: 2px; }
+.outline-edit { display: grid; gap: 6px; margin: 4px 0 8px; }
+.outline-edit textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+.hint.warn { color: #b4471f; }
+.outline-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.outline-edit details summary { cursor: pointer; font-size: 12px; color: #6b6458; }
+.sketch-view { z-index: 6; }
+.sketch-svg { flex: 1; min-height: 0; width: 100%; background: #fbfaf7; border: 1px solid #d9d2c4; border-radius: 6px; cursor: none; user-select: none; }
+.sketch-svg.panning { cursor: grabbing; }
+.sketch-svg .sk-minor { stroke: #ece7de; }
+.sketch-svg .sk-major { stroke: #d6cebf; }
+.sketch-svg .sk-axis { stroke: #b9b0a0; stroke-dasharray: 4 3; }
+.sketch-svg .sk-site { fill: rgba(224, 128, 48, 0.08); stroke: #d9822b; stroke-dasharray: 6 4; }
+.sketch-svg .sk-line { fill: none; stroke: #1f4e79; }
+.sketch-svg .sk-poly { fill: rgba(31, 78, 121, 0.10); stroke: #1f4e79; }
+.sketch-svg .sk-pt { fill: #fff; stroke: #1f4e79; cursor: move; }
+.sketch-svg .sk-pt.first { fill: #1f4e79; }
+.sketch-svg .sk-pt.drag { fill: #d9822b; }
+.sketch-svg .sk-cross line { stroke: #222; }
+.sketch-svg .sk-len { fill: #1f4e79; font-family: ui-monospace, monospace; }
+.sketch-svg .sk-snap { fill: #c0571b; }
+.sketch-cmdline { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.sketch-cmdline input { flex: 1; font-family: ui-monospace, monospace; padding: 4px 6px; }
+#sketch-ortho.on { background: #1f4e79; color: #fff; }

@@ -6,7 +6,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=255" />
+    <link rel="stylesheet" href="styles.css?v=264" />
     <script type="importmap">
       {
         "imports": {
@@ -34,10 +34,6 @@
 
       <section class="pane" data-pane="1">
         <h2>초기 입력</h2>
-        <label>
-          프로젝트명
-          <input id="project-name" type="text" value="주차장 개략 설계" />
-        </label>
         <label>
           대지 주소 <span class="info" tabindex="0" title="도로명 또는 지번 주소. 브이월드(국토교통부) 자료로 용도지역과 건폐율·용적률 상한을 찾아 줍니다.">ⓘ</span>
           <span class="addr-row">
@@ -100,6 +96,19 @@
             <input id="park-depth" type="number" min="18" step="0.1" value="42" />
           </label>
         </div>
+        <div class="outline-edit">
+          <div class="outline-btns">
+            <button type="button" id="outline-draw" class="primary tiny">외곽 그리기 (CAD처럼)</button>
+            <button type="button" id="outline-rect" class="ghost tiny" hidden>직사각형으로</button>
+            <span class="info" tabindex="0" title="점을 찍어 선을 이어 주차장 외곽을 그립니다. 클릭 = 점 · 숫자 + Enter = 마우스 방향으로 그 길이 · @dx,dy = 상대 좌표 · @길이<각도 · x,y = 절대 좌표 · F8 = 직교 켜고 끄기(Shift = 잠깐 반대) · 첫 점 클릭·오른쪽 클릭·C = 닫기 · Backspace = 되돌리기. 닫은 뒤 꼭짓점을 끌어서 고칠 수 있고, 대지 주소를 조회했으면 대지 경계가 밑그림으로 깔립니다. 그리지 않으면 아래 가로·세로 직사각형으로 계산합니다.">ⓘ</span>
+          </div>
+          <p class="hint" id="outline-note"></p>
+          <details id="outline-coords" hidden>
+            <summary>꼭짓점 좌표로 보기·고치기</summary>
+            <textarea id="outline-pts" rows="6" spellcheck="false" title="X, Y (m) 한 줄에 하나 · 왼쪽 아래 = 0, 0"></textarea>
+          </details>
+        </div>
+
         <div class="split column-row">
           <label>
             기둥 간격 (m) <span class="info" tabindex="0" title="기준 기둥 중심 간격. 실제 격자는 차로·램프 위를 피하고 기둥 사이가 12m를 넘지 않게 칸마다 조금씩 조정됨(기둥 격자 먼저). 8.1m·기둥 0.5m면 기둥 사이 7.6m에 2.5m 칸 3대.">ⓘ</span>
@@ -422,6 +431,7 @@
         <div id="sheet-tools" class="split" hidden>
           <button id="sheet-png" type="button" class="ghost">PNG</button>
           <button id="sheet-svg" type="button" class="ghost">SVG</button>
+          <button id="sheet-dxf" type="button" class="ghost" title="AutoCAD 등에서 여는 DXF(R12). 단위 mm, 1:1, 레이어별(외벽·기둥·코어·램프·주차칸 종류·충전기 등)">CAD(DXF)</button>
           <button id="sheet-print" type="button" class="ghost">A3 인쇄</button>
         </div>
         <button id="back-plan" type="button">평면으로 돌아가기</button>
@@ -431,7 +441,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r255</span>
+        <br /><span class="hint">버전 2026-11-10 · r264</span>
       </p>
     </aside>
 
@@ -474,6 +484,24 @@
           <li><i class="swatch exit"></i>출구</li>
         </ul>
       </div>
+      <div id="sketch-view" class="context-view sketch-view" hidden>
+        <div class="cx-head">
+          <h3>주차장 외곽 그리기</h3>
+          <div class="cx-modes">
+            <button type="button" id="sketch-ortho" class="ghost tiny">직교 켬 (F8)</button>
+            <button type="button" id="sketch-undo" class="ghost tiny">되돌리기</button>
+            <button type="button" id="sketch-close-poly" class="ghost tiny">닫기(C)</button>
+            <button type="button" id="sketch-clear" class="ghost tiny">새로 그리기</button>
+            <button type="button" id="sketch-fit" class="ghost tiny">맞춤</button>
+            <button type="button" id="sketch-cancel" class="ghost tiny">취소</button>
+            <button type="button" id="sketch-apply" class="primary tiny">적용</button>
+          </div>
+        </div>
+        <p id="sketch-status" class="hint"></p>
+        <svg id="sketch-svg" class="sketch-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="sketch-cmdline"><span>명령:</span><input id="sketch-cmd" autocomplete="off" spellcheck="false" placeholder="길이 / @dx,dy / @길이<각도 / x,y / C 닫기 / U 되돌리기 — Enter" /></div>
+        <p class="hint">클릭 = 점 · 휠 = 확대 · 드래그 = 이동 · 더블클릭 = 맞춤 · 오른쪽 클릭 = 닫기 · 끝점(■)·대지 꼭짓점에 붙음 · 주황 선 = 대지 경계 · 닫은 뒤 ■를 끌어 고치기</p>
+      </div>
       <div id="context-view" class="context-view" hidden>
         <div class="cx-head">
           <h3 id="context-title">주변 매스</h3>
@@ -493,7 +521,7 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=255"></script>
+    <script type="module" src="src/main.js?v=264"></script>
       <div id="busy" class="busy" hidden role="status" aria-live="polite">
       <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
     </div>

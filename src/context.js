@@ -2,7 +2,7 @@
 // 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다. 지도는 Leaflet(전역 L) + 브이월드 WMTS 타일.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=255";
+import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=264";
 
 const $ = (id) => document.getElementById(id);
 const MAX_SIDE = 1000;   // 영역 한 변 최대(m). 브이월드가 레이어당 1,000개까지만 준다.
@@ -85,6 +85,7 @@ function pathOf(ring) {
 
 function draw2d(model) {
   const { hx, hy } = model;
+  draw.center = model.center;
   const maxH = Math.max(10, ...model.buildings.map((b) => b.h));
   const parcels = model.parcels.map((r) => `<path d="${pathOf(r)}" class="cx-parcel"/>`).join("");
   const site = model.siteRings.map((r) => `<path d="${pathOf(r)}" class="cx-site"/>`).join("");
@@ -135,6 +136,7 @@ function draw2d(model) {
       <defs><clipPath id="cx-clip"><rect x="${-hx}" y="${-hy}" width="${2 * hx}" height="${2 * hy}"/></clipPath></defs>
       <rect x="${-hx}" y="${-hy}" width="${2 * hx}" height="${2 * hy}" class="cx-bg"/>
       <g clip-path="url(#cx-clip)"><g class="cx-tiles"></g>${parcels}${site}</g>${builds}
+      <g class="cx-outline"></g>
     </svg>
     <div class="cx-north2">▲<br>N</div>
     <div class="cx-bar2"><span></span><i></i></div>`;
@@ -184,20 +186,121 @@ function bind2dView(model) {
   svg.addEventListener("contextmenu", (e) => e.preventDefault());
   svg.addEventListener("mousedown", (e) => {
     const [, , scale] = toSvg(e);
-    drag = { x: e.clientX, y: e.clientY, scale };
+    drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, scale, moved: false };
     svg.classList.add("panning");
     e.preventDefault();
   });
   window.addEventListener("mousemove", (e) => {
+    if (draw.on && !drag) {
+      const [px, py, scale] = toSvg(e);
+      draw.hover = snapPoint([px, -py], e.shiftKey, scale);
+      renderOutline();
+    }
     if (!drag) return;
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 4) drag.moved = true;
+    if (!drag.moved) return;
     view = { ...view, x: view.x - (e.clientX - drag.x) / drag.scale, y: view.y - (e.clientY - drag.y) / drag.scale };
     drag.x = e.clientX; drag.y = e.clientY;
     apply();
   });
-  window.addEventListener("mouseup", () => { if (drag) { drag = null; svg.classList.remove("panning"); } });
-  svg.addEventListener("dblclick", () => { view = { ...full }; apply(); });
+  window.addEventListener("mouseup", (e) => {
+    if (!drag) return;
+    const click = !drag.moved && e.button === 0;
+    drag = null;
+    svg.classList.remove("panning");
+    // 그리기 중: 왼쪽 클릭 = 꼭짓점 찍기(직각 스냅, Shift = 자유), 첫 점 근처 클릭 = 닫기
+    if (click && draw.on) {
+      const [px, py, scale] = toSvg(e);
+      const p = snapPoint([px, -py], e.shiftKey, scale);
+      const first = draw.pts[0];
+      if (first && draw.pts.length >= 3 && Math.hypot(p[0] - first[0], p[1] - first[1]) < 12 / scale) { finishDraw(); return; }
+      draw.pts.push(p);
+      renderOutline();
+    }
+  });
+  svg.addEventListener("dblclick", () => { if (draw.on) return; view = { ...full }; apply(); });
   apply();
+  renderOutline();
 }
+
+// ── 주차장 외곽 그리기(2D) ──
+// 좌표는 대지 중심 기준 m(동 +x, 북 +y). 끝나면 onDone(점 목록)을 부른다.
+const draw = { on: false, pts: [], hover: null, onDone: null, shown: null, center: null };
+function snapPoint([x, y], free, scale) {
+  const r = (v) => Math.round(v * 10) / 10;
+  let p = [r(x), r(y)];
+  const last = draw.pts[draw.pts.length - 1];
+  if (last && !free) {
+    // 앞 점에서 가로 또는 세로로만(직각)
+    if (Math.abs(p[0] - last[0]) >= Math.abs(p[1] - last[1])) p = [p[0], last[1]];
+    else p = [last[0], p[1]];
+    // 첫 점과 x 또는 y가 가까우면 맞춰서 닫기 쉽게
+    const first = draw.pts[0];
+    const tol = 8 / (scale || 1);
+    if (first && draw.pts.length >= 2) {
+      if (Math.abs(p[0] - first[0]) < tol && p[1] === last[1]) p[0] = first[0];
+      if (Math.abs(p[1] - first[1]) < tol && p[0] === last[0]) p[1] = first[1];
+    }
+  }
+  return p;
+}
+function renderOutline() {
+  const g = document.querySelector("#context-2d .cx-outline");
+  if (!g) return;
+  const toSvgPts = (pts) => pts.map(([x, y]) => `${x.toFixed(2)},${(-y).toFixed(2)}`).join(" ");
+  let html = "";
+  if (draw.on) {
+    const pts = draw.pts.concat(draw.hover ? [draw.hover] : []);
+    if (pts.length >= 2) html += `<polyline points="${toSvgPts(pts)}" class="cx-draw"/>`;
+    draw.pts.forEach(([x, y], i) => { html += `<circle cx="${x}" cy="${-y}" r="${i === 0 ? 1.6 : 1}" class="cx-draw-pt${i === 0 ? " first" : ""}"/>`; });
+    if (draw.hover && draw.pts.length) {
+      const last = draw.pts[draw.pts.length - 1];
+      const len = Math.hypot(draw.hover[0] - last[0], draw.hover[1] - last[1]);
+      html += `<text x="${draw.hover[0] + 1.5}" y="${-draw.hover[1] - 1.5}" class="cx-draw-len">${len.toFixed(1)}m</text>`;
+    }
+  } else if (draw.shown && draw.shown.pts && draw.shown.pts.length >= 3 && draw.center) {
+    // 저장된 외곽(그릴 때 중심 기준) → 지금 화면 중심 기준으로 옮겨 그림
+    const kx = 111320 * Math.cos((draw.center.y * Math.PI) / 180);
+    const dx = (draw.shown.center.x - draw.center.x) * kx;
+    const dy = (draw.shown.center.y - draw.center.y) * 110540;
+    html += `<polygon points="${toSvgPts(draw.shown.pts.map(([x, y]) => [x + dx, y + dy]))}" class="cx-outline-poly"/>`;
+  }
+  g.innerHTML = html;
+}
+function finishDraw() {
+  const pts = draw.pts.slice();
+  draw.on = false;
+  draw.pts = [];
+  draw.hover = null;
+  draw.shown = { center: draw.center, pts };
+  $("context-status").textContent = "주차장 외곽을 넣었습니다. 왼쪽 '주차장 모양'에서 숫자로 고칠 수 있습니다.";
+  renderOutline();
+  if (draw.onDone) draw.onDone({ center: draw.center, pts });
+}
+// 그리기 시작: 2D로 바꾸고 클릭을 기다린다
+export function startOutlineDraw(onDone) {
+  draw.on = true;
+  draw.pts = [];
+  draw.hover = null;
+  draw.onDone = onDone;
+  setMode("2d").then(() => {
+    $("context-status").textContent = "주차장 외곽 그리기: 왼쪽 클릭 = 꼭짓점(가로·세로로 맞춤, Shift = 비스듬히) · 첫 점 클릭 = 닫기 · Backspace = 한 점 취소 · Esc = 그만 · 드래그 = 이동";
+    renderOutline();
+  });
+}
+// 이미 정한 외곽 { center: 경위도, pts: 그 중심 기준 m }을 2D에 보여 준다
+export function showOutline(geo) {
+  draw.shown = geo && geo.pts && geo.pts.length >= 3 ? geo : null;
+  renderOutline();
+}
+export function contextCenter() {
+  return ctx ? { x: ctx.point.x, y: ctx.point.y } : null;
+}
+window.addEventListener("keydown", (e) => {
+  if (!draw.on) return;
+  if (e.key === "Backspace") { draw.pts.pop(); renderOutline(); e.preventDefault(); }
+  if (e.key === "Escape") { draw.on = false; draw.pts = []; draw.hover = null; renderOutline(); $("context-status").textContent = "외곽 그리기를 그만뒀습니다."; }
+});
 
 // 영역(model.bbox)을 덮는 지도 타일을 한 장의 캔버스로 붙여 3D 바닥 텍스처로 쓴다. 타일이 올 때마다 onUpdate.
 function groundTexture(model, onUpdate) {
@@ -300,12 +403,16 @@ function draw3d(model) {
     const pts = ring.map(([x, y]) => new THREE.Vector3(x, 0.05, -y));
     scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
   });
-  const siteMat = new THREE.MeshBasicMaterial({ color: 0xe8a25c, side: THREE.DoubleSide, clippingPlanes: clip });
+  // 대지: 연한 반투명 주황(아래 지도·위성 바닥이 비쳐 보이게) + 진한 주황 테두리
+  const siteMat = new THREE.MeshBasicMaterial({ color: 0xe8a25c, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: clip });
+  const siteEdge = new THREE.LineBasicMaterial({ color: 0xc2701f, clippingPlanes: clip });
   model.siteRings.forEach((ring) => {
     const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(ring)), siteMat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = 0.08;
     scene.add(mesh);
+    const pts = ring.map(([x, y]) => new THREE.Vector3(x, 0.12, -y));
+    scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), siteEdge));
   });
   const mat = new THREE.MeshLambertMaterial({ color: 0xc9c4ba });
   const edgeMat = new THREE.LineBasicMaterial({ color: 0x8a8578 });
@@ -359,7 +466,8 @@ function setRect(b) {
 function finishRect(raw) {
   const size = boxSize(raw);
   if (size.w < 30 || size.d < 30) {
-    if (ctx.prevBox) setRect(ctx.prevBox);
+    if (ctx.prevBox && ctx.userBox) setRect(ctx.prevBox);
+    else if (rect) { rect.remove(); rect = null; }
     $("context-area").textContent = "영역이 너무 작습니다. 다시 그려 주세요.";
     return;
   }
@@ -367,6 +475,7 @@ function finishRect(raw) {
   setRect(box);
   if (clamped) $("context-area").textContent = areaText(box, ` (한 변 최대 ${MAX_SIDE}m로 줄임)`);
   ctx.prevBox = box;
+  ctx.userBox = true;
   // 영역을 고르면 바로 2D로 넘어간다
   setMode("2d");
 }
@@ -446,7 +555,12 @@ function showMap() {
       ctx.viewSet = true;
     }
   }, 0);
-  setRect(ctx.bbox);
+  // 처음 주소 조회 때는 기본 영역(사각형)을 그리지 않는다. 직접 드래그해서 고른 뒤에만 표시.
+  if (ctx.userBox) setRect(ctx.bbox);
+  else {
+    if (rect) { rect.remove(); rect = null; }
+    $("context-area").textContent = "왼쪽 드래그로 볼 영역을 그리면 2D로 넘어갑니다 (안 그리면 대지 주변 기본 범위)";
+  }
 }
 
 // ── 화면 전환 ──

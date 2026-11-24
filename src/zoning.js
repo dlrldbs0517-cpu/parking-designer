@@ -74,14 +74,56 @@ function domain() {
   return SERVICE_URL;
 }
 
+// 주소 → 좌표. 도로명(…로/…길 + 번호)인지 지번(…동/…리/…가 + 번호)인지 보고 그 방식으로 먼저 찾는다.
+// 주의: 지번 주소를 도로명으로 찾으면 브이월드가 '공릉동 172' → '공릉로 172'처럼 비슷한 도로명으로 고쳐서
+// 전혀 다른 곳을 돌려준다. 그래서 고쳐진 주소(refined)에 입력한 도로명·동 이름이 그대로 있는지 확인한다.
+export function addressKind(address) {
+  const a = String(address || "");
+  const road = a.match(/(\S+(?:로|길))\s*(\d+(?:-\d+)?)/);
+  const parcel = a.match(/(\S+(?:동|리|가))\s*(?:산\s*)?(\d+(?:-\d+)?)/);
+  if (road && (!parcel || road.index >= parcel.index)) return { first: "road", token: road[1] };
+  if (parcel) return { first: "parcel", token: parcel[1] };
+  return { first: "road", token: null };
+}
+
+// 도로명 주소 → 그 주소의 지번(검색 API) → 지번 좌표. 못 찾으면 null.
+async function parcelOfRoad(roadText) {
+  const query = String(roadText).replace(/\s*\(.*?\)\s*/g, " ").trim();
+  const url = `${API}/search?service=search&request=search&version=2.0&size=1&type=address&category=road&format=json`
+    + `&query=${encodeURIComponent(query)}&key=${VWORLD_KEY}&domain=${encodeURIComponent(domain())}`;
+  const data = await call(url);
+  const item = data && data.response && data.response.result && data.response.result.items && data.response.result.items[0];
+  const parcel = item && item.address && item.address.parcel;
+  if (!parcel) return null;
+  // 지번에는 시·군·구가 없으니 도로명 주소 앞부분(시·도 시·군·구)을 붙인다
+  const head = query.split(/\s+/).filter((w) => /(시|도|군|구)$/.test(w)).slice(0, 3).join(" ");
+  const full = `${head} ${parcel}`.trim();
+  const url2 = `${API}/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&format=json&refine=true&simple=false`
+    + `&type=parcel&address=${encodeURIComponent(full)}&key=${VWORLD_KEY}&domain=${encodeURIComponent(domain())}`;
+  const d2 = await call(url2);
+  const r2 = d2 && d2.response;
+  if (!(r2 && r2.status === "OK" && r2.result && r2.result.point)) return null;
+  return { x: Number(r2.result.point.x), y: Number(r2.result.point.y), parcel };
+}
+
 export async function geocode(address) {
-  for (const type of ["road", "parcel"]) {
+  const kind = addressKind(address);
+  const order = kind.first === "parcel" ? ["parcel", "road"] : ["road", "parcel"];
+  for (const type of order) {
     const url = `${API}/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&format=json&refine=true&simple=false`
       + `&type=${type}&address=${encodeURIComponent(address)}&key=${VWORLD_KEY}&domain=${encodeURIComponent(domain())}`;
     const data = await call(url);
     const r = data && data.response;
     if (r && r.status === "OK" && r.result && r.result.point) {
       const refined = r.refined && r.refined.text;
+      // 입력한 도로명·동 이름이 고쳐진 주소에 없으면 다른 곳으로 잘못 고친 것 → 버리고 다음 방식으로
+      if (kind.token && refined && !refined.includes(kind.token)) continue;
+      // 도로명 좌표는 건물 출입구 쪽 점이라 옆 필지에 떨어질 수 있다(과기대: 공릉로 232 → 하계동 78-1).
+      // 그 도로명 주소의 공식 지번을 찾아 지번 좌표로 바꾼다.
+      if (type === "road") {
+        const jibun = await parcelOfRoad(refined || address).catch(() => null);
+        if (jibun) return { ...jibun, text: `${refined || address} · 지번 ${jibun.parcel}`, type: "road", roadPoint: { x: Number(r.result.point.x), y: Number(r.result.point.y) } };
+      }
       return { x: Number(r.result.point.x), y: Number(r.result.point.y), text: refined || address, type };
     }
     if (r && r.status === "ERROR") throw new Error((r.error && r.error.text) || "지오코더 오류");
