@@ -6,7 +6,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=264" />
+    <link rel="stylesheet" href="styles.css?v=306" />
     <script type="importmap">
       {
         "imports": {
@@ -86,39 +86,65 @@
         </dialog>
         <button type="button" id="suggest-size" class="ghost tiny">법정 대수로 크기 추천</button>
         <p class="hint" id="suggest-note"></p>
-        <div class="split">
-          <label>
-            주차장 가로 (m) <span class="info" tabindex="0" title="주차장(지하 외벽 안쪽) 크기. 모르면 위 '법정 대수로 크기 추천'으로 채운 뒤 고쳐 쓰세요.">ⓘ</span>
-            <input id="park-width" type="number" min="18" step="0.1" value="48" />
-          </label>
-          <label>
-            주차장 세로 (m)
-            <input id="park-depth" type="number" min="18" step="0.1" value="42" />
-          </label>
-        </div>
         <div class="outline-edit">
           <div class="outline-btns">
-            <button type="button" id="outline-draw" class="primary tiny">외곽 그리기 (CAD처럼)</button>
+            <button type="button" id="outline-draw" class="primary tiny">외곽 그리기</button>
+            <button type="button" id="outline-detail-btn" class="ghost tiny" aria-expanded="false" hidden>상세 입력</button>
             <button type="button" id="outline-rect" class="ghost tiny" hidden>직사각형으로</button>
-            <span class="info" tabindex="0" title="점을 찍어 선을 이어 주차장 외곽을 그립니다. 클릭 = 점 · 숫자 + Enter = 마우스 방향으로 그 길이 · @dx,dy = 상대 좌표 · @길이<각도 · x,y = 절대 좌표 · F8 = 직교 켜고 끄기(Shift = 잠깐 반대) · 첫 점 클릭·오른쪽 클릭·C = 닫기 · Backspace = 되돌리기. 닫은 뒤 꼭짓점을 끌어서 고칠 수 있고, 대지 주소를 조회했으면 대지 경계가 밑그림으로 깔립니다. 그리지 않으면 아래 가로·세로 직사각형으로 계산합니다.">ⓘ</span>
+            <span class="info" tabindex="0" title="주차장(지하 외벽 안쪽) 모양. '외곽 그리기'로 점을 찍어 선을 이어 그립니다: 클릭 = 점 · 숫자 + Enter = 마우스 방향으로 그 길이 · @dx,dy = 상대 좌표 · @길이<각도 · x,y = 절대 좌표 · F8 = 직교 켜고 끄기(Shift = 잠깐 반대) · 첫 점 클릭·오른쪽 클릭·C = 닫기 · Backspace = 되돌리기. 닫은 뒤 꼭짓점을 끌어서 고칠 수 있고, 대지 주소를 조회했으면 대지 경계가 밑그림으로 깔립니다. 직사각형이면 '법정 대수로 크기 추천'으로 정하거나, 그리기에서 x,y와 @가로,0 · @0,세로 · @-가로,0 · C로 그릴 수 있습니다.">ⓘ</span>
           </div>
           <p class="hint" id="outline-note"></p>
-          <details id="outline-coords" hidden>
-            <summary>꼭짓점 좌표로 보기·고치기</summary>
-            <textarea id="outline-pts" rows="6" spellcheck="false" title="X, Y (m) 한 줄에 하나 · 왼쪽 아래 = 0, 0"></textarea>
-          </details>
+          <div id="outline-detail" class="outline-detail" hidden>
+            <div class="split">
+              <label>
+                직사각형 가로 (m)
+                <input id="park-width" type="number" min="18" step="0.1" value="48" />
+              </label>
+              <label>
+                직사각형 세로 (m)
+                <input id="park-depth" type="number" min="18" step="0.1" value="42" />
+              </label>
+            </div>
+            <p class="hint" id="outline-rect-note">모르면 위 '법정 대수로 크기 추천'으로 채운 뒤 고쳐 쓰세요.</p>
+            <label id="outline-coords" hidden>
+              꼭짓점 좌표 (X, Y m · 한 줄에 하나 · 왼쪽 아래 = 0, 0)
+              <textarea id="outline-pts" rows="6" spellcheck="false"></textarea>
+            </label>
+          </div>
         </div>
 
-        <div class="split column-row">
+
+        <div class="split">
+          <label>
+            층고 (m)
+            <input id="floor-height" type="number" min="2.6" max="6" step="0.05" value="3.2" />
+          </label>
           <label>
             기둥 간격 (m) <span class="info" tabindex="0" title="기준 기둥 중심 간격. 실제 격자는 차로·램프 위를 피하고 기둥 사이가 12m를 넘지 않게 칸마다 조금씩 조정됨(기둥 격자 먼저). 8.1m·기둥 0.5m면 기둥 사이 7.6m에 2.5m 칸 3대.">ⓘ</span>
             <input id="column-spacing" type="number" min="5" max="12" step="0.1" value="8.1" />
           </label>
-          <button type="button" id="open-column-dialog" class="ghost tiny">기둥 고급 설정</button>
+        </div>
+        <div class="split column-row">
+          <p id="clear-readout" class="hint">차로 유효높이 2.3m 이상</p>
+          <button type="button" id="open-column-dialog" class="ghost tiny">상세 입력</button>
         </div>
         <p id="column-summary" class="hint"></p>
         <dialog id="column-dialog" class="settings-dialog">
-          <h3>기둥 고급 설정</h3>
+          <h3>층고·기둥 상세 입력</h3>
+          <h4>층고</h4>
+          <label class="check"><input id="per-floor-height" type="checkbox" /> 층마다 층고 다르게</label>
+          <div id="floor-height-rows" class="floor-height-rows" hidden></div>
+          <div id="floor-height-tools" class="outline-btns" hidden>
+            <button type="button" id="floor-row-add" class="ghost tiny">층 추가</button>
+            <button type="button" id="floor-row-remove" class="ghost tiny">층 빼기</button>
+          </div>
+          <p class="hint" id="floor-height-note">램프는 가장 높은 층고에 맞춘 길이로 잡고, 층고가 낮은 층은 램프가 아래층에 도착하는 끝을 모든 층에서 같은 자리로 맞춥니다(남는 위쪽은 평평한 진입부).</p>
+          <label class="check" id="ground-access-row">
+            <input id="no-ground-access" type="checkbox" checked />
+          지상공원형 단지 (지상에 차 없음) → 지하 차로 2.7m <span class="info" tabindex="0" title="차가 지하로만 다니는 단지는 택배차가 지하로 들어가야 해서 차로 2.7m 이상(주택건설기준 규칙 제6조의2). 지상 도로로 동 앞까지 갈 수 있으면 체크 해제(2.3m).">ⓘ</span>
+        </label>
+          <p class="hint">체크 = 지상에 차가 안 다니는 단지(택배차도 지하로) → 차로 유효높이 2.7m 이상. 해제 = 지상 도로로 동 앞까지 갈 수 있는 단지 → 2.3m 이상.</p>
+          <h4>기둥</h4>
           <div class="split">
             <label>
               기둥 단면 (m)
@@ -188,20 +214,14 @@
           <p class="hint">주차장법 시행규칙 제3조①1: 평행주차형식 일반형 2.0×6.0m 이상. 직각 칸이 못 들어가는 차로 옆 빈 띠(폭 2m 이상)에 차로와 나란히 넣습니다. 확장형 30%는 평행 칸을 뺀 칸 수 기준.</p>
           <div class="dialog-actions"><button type="button" id="close-disabled-dialog">확인</button></div>
         </dialog>
-        <div class="split">
-          <label>
-            층고 (m)
-            <input id="floor-height" type="number" min="2.6" max="6" step="0.05" value="3.2" />
-          </label>
-          <p id="clear-readout" class="hint">차로 유효높이 2.3m 이상</p>
+        <div class="split column-row">
+          <p id="ramp-start-note" class="hint"></p>
+          <button type="button" id="ramp-start-btn" class="ghost tiny">램프 시작점 찍기</button>
         </div>
-        <label class="check" id="ground-access-row">
-          <input id="no-ground-access" type="checkbox" checked />
-          지상공원형 단지 (지상에 차 없음) → 지하 차로 2.7m <span class="info" tabindex="0" title="차가 지하로만 다니는 단지는 택배차가 지하로 들어가야 해서 차로 2.7m 이상(주택건설기준 규칙 제6조의2). 지상 도로로 동 앞까지 갈 수 있으면 체크 해제(2.3m).">ⓘ</span>
-        </label>
-        <div class="split">
+        <div class="split" id="ramp-select-row" hidden>
           <label>
             도로 접한 변
+            <span id="road-edge-auto" class="road-auto" hidden></span>
             <select id="road-edge">
               <option value="s">남측 (아래)</option>
               <option value="n">북측 (위)</option>
@@ -210,7 +230,7 @@
             </select>
           </label>
           <label>
-            램프 위치 <span class="info" tabindex="0" title="램프는 도로에서 바로 들어오므로 도로 접한 변에 둡니다. 자동은 양 끝·가운데를 모두 짜 보고 대수가 가장 많은 곳을 고릅니다. 도로변 3m는 경사 8.5% 이하로 자동 반영.">ⓘ</span>
+            램프 위치 <span class="info" tabindex="0" title="램프는 도로에서 바로 들어오므로 도로 접한 변에 둡니다. 기본은 직접 고른 자리(빠름). 자동은 양 끝·가운데를 모두 짜 보고 대수가 가장 많은 곳을 고릅니다(세 배쯤 오래 걸림). 다른 자리는 평면의 V3 '램프 위치 바꿈' 안으로도 비교됩니다. 도로변 3m는 경사 8.5% 이하로 자동 반영.">ⓘ</span>
             <select id="ramp-pos"></select>
           </label>
         </div>
@@ -313,7 +333,7 @@
             <p id="core-search-note" class="hint"></p>
             <button type="button" id="auto-core" class="ghost tiny">코어 자리 자동 찾기</button>
           </div>
-          <p class="hint">코어는 기둥 격자에 맞춰 놓입니다(1칸 = 기둥 간격, 예: 8.1×8.1m. 코어 칸에는 기둥을 두지 않고 코어 벽이 받음). 평면 만들기 때 격자 칸을 모두 돌려 보고 대수가 가장 많은 자리에 둡니다(직접 옮기면 그 자리를 유지). 추천은 기둥 간격 기준 계단+승강기 2대 코어(약 50㎡ 이상)가 들어가는 가장 작은 칸 수입니다.</p>
+          <p class="hint">코어는 기둥 격자에 맞춰 놓입니다(1칸 = 기둥 간격, 예: 8.1×8.1m. 코어 칸에는 기둥을 두지 않고 코어 벽이 받음). 처음엔 기본 자리에 두고, 평면에서 끌어 옮기거나 '코어 자리 자동 찾기'를 누르면 격자 칸을 모두 돌려 보고 대수가 가장 많은 자리로 옮깁니다(시간이 걸림). 추천은 기둥 간격 기준 계단+승강기 2대 코어(약 50㎡ 이상)가 들어가는 가장 작은 칸 수입니다.</p>
           <dialog id="core-dialog" class="settings-dialog">
             <h3>코어 직접 설정</h3>
             <label>
@@ -441,7 +461,7 @@
       <p class="note">
         주차칸 일반 2.5×5.0m · 확장형 2.6×5.2m(50대 이상 30%, 이때 줄 깊이 5.2m), 직각 차로 6m, 직선 램프 17% 이하, 차로 높이 2.3m 이상.
         법정 대수는 주택건설기준 제27조와 주차장법 시행령 별표 1의 개략값입니다.
-        <br /><span class="hint">버전 2026-11-10 · r264</span>
+        <br /><span class="hint">버전 2026-11-10 · r306</span>
       </p>
     </aside>
 
@@ -488,19 +508,23 @@
         <div class="cx-head">
           <h3>주차장 외곽 그리기</h3>
           <div class="cx-modes">
-            <button type="button" id="sketch-ortho" class="ghost tiny">직교 켬 (F8)</button>
-            <button type="button" id="sketch-undo" class="ghost tiny">되돌리기</button>
-            <button type="button" id="sketch-close-poly" class="ghost tiny">닫기(C)</button>
-            <button type="button" id="sketch-clear" class="ghost tiny">새로 그리기</button>
-            <button type="button" id="sketch-fit" class="ghost tiny">맞춤</button>
+            <button type="button" id="sketch-rect" class="ghost tiny icon-btn" data-tip="직사각형 (REC) — 한 모서리 → 맞은편 모서리, 또는 가로 Enter → 세로 Enter" aria-label="직사각형 (REC) — 한 모서리 → 맞은편 모서리, 또는 가로 Enter → 세로 Enter"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12"/><circle cx="4" cy="18" r="1.4" fill="currentColor"/><circle cx="20" cy="6" r="1.4" fill="currentColor"/></svg></button>
+            <button type="button" id="sketch-ortho" class="ghost tiny icon-btn" data-tip="직교 (F8) — 가로·세로로만 긋기" aria-label="직교 (F8) — 가로·세로로만 긋기"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V5"/><path d="M5 19h14"/><path d="M5 5l-2 3M5 5l2 3"/><path d="M19 19l-3-2M19 19l-3 2"/></svg></button>
+            <button type="button" id="sketch-undo" class="ghost tiny icon-btn" data-tip="되돌리기 (U · Backspace)" aria-label="되돌리기 (U · Backspace)"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+            <button type="button" id="sketch-close-poly" class="ghost tiny icon-btn" data-tip="닫기 (C) — 첫 점과 이어 외곽 완성" aria-label="닫기 (C) — 첫 점과 이어 외곽 완성"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18l4-11 8 3 2 8z"/><circle cx="5" cy="18" r="1.6" fill="currentColor"/></svg></button>
+            <button type="button" id="sketch-ramp" class="ghost tiny icon-btn" data-tip="램프 시작점 — 시작점 클릭 → 방향 클릭" aria-label="램프 시작점 — 시작점 클릭 → 방향 클릭"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="12" r="3" fill="currentColor" stroke="none"/><path d="M10 12h10"/><path d="M16 8l4 4-4 4"/></svg></button>
+            <button type="button" id="sketch-ramp-dir" class="ghost tiny icon-btn" data-tip="방향 돌리기 (R · 화살표 키)" aria-label="방향 돌리기 (R · 화살표 키)" hidden><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/></svg></button>
+            <button type="button" id="sketch-clear" class="ghost tiny icon-btn" data-tip="새로 그리기 — 지우고 처음부터" aria-label="새로 그리기 — 지우고 처음부터"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg></button>
+            <button type="button" id="sketch-fit" class="ghost tiny icon-btn" data-tip="전체 보기 — 외곽·대지가 다 보이게" aria-label="전체 보기 — 외곽·대지가 다 보이게"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"/><path d="M20 9V4h-5"/><path d="M4 15v5h5"/><path d="M20 15v5h-5"/></svg></button>
             <button type="button" id="sketch-cancel" class="ghost tiny">취소</button>
             <button type="button" id="sketch-apply" class="primary tiny">적용</button>
           </div>
         </div>
         <p id="sketch-status" class="hint"></p>
+        <div id="sketch-busy" class="sketch-busy" hidden><div><i class="sk-spin"></i>적용 중… 외곽에 맞춰 배치를 다시 계산하고 있어요</div></div>
         <svg id="sketch-svg" class="sketch-svg" preserveAspectRatio="xMidYMid meet"></svg>
-        <div class="sketch-cmdline"><span>명령:</span><input id="sketch-cmd" autocomplete="off" spellcheck="false" placeholder="길이 / @dx,dy / @길이<각도 / x,y / C 닫기 / U 되돌리기 — Enter" /></div>
-        <p class="hint">클릭 = 점 · 휠 = 확대 · 드래그 = 이동 · 더블클릭 = 맞춤 · 오른쪽 클릭 = 닫기 · 끝점(■)·대지 꼭짓점에 붙음 · 주황 선 = 대지 경계 · 닫은 뒤 ■를 끌어 고치기</p>
+        <div class="sketch-cmdline"><span>명령:</span><input id="sketch-cmd" autocomplete="off" spellcheck="false" placeholder="길이 / @dx,dy / @길이<각도 / x,y / C 닫기 / U 되돌리기 / REC 직사각형 — Enter" /></div>
+        <p class="hint">클릭 = 점 · 휠 = 확대 · 드래그 = 이동 · 더블클릭 = 전체 보기 · 오른쪽 클릭 = 닫기 · 끝점(■)·대지 꼭짓점에 붙음 · 주황 선 = 대지 경계 · 닫은 뒤 ■를 끌어 고치기</p>
       </div>
       <div id="context-view" class="context-view" hidden>
         <div class="cx-head">
@@ -521,9 +545,9 @@
       </div>
     </main>
 
-    <script type="module" src="src/main.js?v=264"></script>
+    <script type="module" src="src/main.js?v=306"></script>
       <div id="busy" class="busy" hidden role="status" aria-live="polite">
-      <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span></div>
+      <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span><button type="button" id="busy-cancel" class="ghost tiny" hidden>취소</button></div>
     </div>
   </body>
 </html>

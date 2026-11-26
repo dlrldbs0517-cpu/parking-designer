@@ -514,3 +514,77 @@ select:disabled { background: #efebe3; color: #333; opacity: 1; }
 .sketch-cmdline { display: flex; gap: 6px; align-items: center; font-size: 12px; }
 .sketch-cmdline input { flex: 1; font-family: ui-monospace, monospace; padding: 4px 6px; }
 #sketch-ortho.on { background: #1f4e79; color: #fff; }
+
+.sketch-busy { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(243, 239, 231, 0.75); }
+.sketch-busy[hidden] { display: none; }
+.sketch-busy > div { display: flex; align-items: center; gap: 10px; padding: 14px 20px; background: #fff; border: 1px solid #d9d2c4; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+.sk-spin { width: 18px; height: 18px; border: 3px solid #e4dfd6; border-top-color: #c0571b; border-radius: 50%; animation: sk-spin 0.8s linear infinite; }
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+
+.outline-detail { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid #e4dfd6; border-radius: 8px; background: #fbfaf7; }
+.outline-detail textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+#outline-detail-btn.on { background: #efe9dd; }
+#height-detail-btn.on { background: #efe9dd; }
+
+.floor-height-rows { display: grid; gap: 6px; }
+.floor-row { display: grid; grid-template-columns: 110px 90px 1fr; gap: 8px; align-items: center; font-size: 13px; }
+.floor-row input { padding: 4px 6px; }
+.floor-row em { font-style: normal; font-size: 12px; color: #6b6458; }
+.floor-row em.bad { color: #b4471f; }
+
+/* 지도 위 외곽 그리기: 그리기 막대만 보이고 아래 지도는 그대로 */
+.sketch-view.on-map { background: transparent; pointer-events: none; }
+.sketch-view.on-map > * { pointer-events: auto; }
+.sketch-view.on-map .cx-head, .sketch-view.on-map > p, .sketch-view.on-map .sketch-cmdline { background: #f3efe7; border-radius: 8px; padding: 2px 6px; }
+.sketch-view.on-map #sketch-svg { visibility: hidden; pointer-events: none; }
+.cx-draw-svg { position: absolute; inset: 0; z-index: 650; pointer-events: none; }
+.cx-draw-svg .sk-line { fill: none; stroke: #1f4e79; }
+.cx-draw-svg .sk-poly { fill: rgba(31, 78, 121, 0.14); stroke: #1f4e79; }
+.cx-draw-svg .sk-pt { fill: #fff; stroke: #1f4e79; }
+.cx-draw-svg .sk-pt.first { fill: #1f4e79; }
+.cx-draw-svg .sk-pt.drag { fill: #d9822b; }
+.cx-draw-svg .sk-cross line { stroke: #111; }
+.cx-draw-svg .sk-len { fill: #0f2f4d; font-family: ui-monospace, monospace; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+.cx-draw-svg .sk-snap { fill: #c0571b; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+#context-map.drawing { cursor: crosshair; }
+#context-view.drawing-outline > p, #context-view.drawing-outline > .cx-head { visibility: hidden; }
+.settings-dialog h4 { margin: 12px 0 4px; font-size: 13px; color: #6b6458; border-top: 1px solid #e4dfd6; padding-top: 10px; }
+.settings-dialog h3 + h4 { border-top: 0; padding-top: 0; }
+.road-auto { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 38px; font-size: 13px; }
+.road-auto small { color: #6b6458; }
+
+.sk-ramp, .cx-draw-svg .sk-ramp { fill: rgba(217, 130, 43, 0.35); stroke: #c0571b; }
+.sk-ramp-t, .cx-draw-svg .sk-ramp-t { fill: #7a3e0a; font-weight: 700; }
+#sketch-ramp.on { background: #c0571b; color: #fff; }
+.sk-ramp-dot, .cx-draw-svg .sk-ramp-dot { fill: #e0312a; stroke: #fff; }
+.sk-ramp-t, .cx-draw-svg .sk-ramp-t { fill: #b3241e; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 3px; }
+.sk-ramp-ghost, .cx-draw-svg .sk-ramp-ghost { fill: none; stroke: #e0312a; stroke-dasharray: 3 2; }
+.sk-ramp-arrow, .cx-draw-svg .sk-ramp-arrow { stroke: #e0312a; }
+.sk-ramp-head, .cx-draw-svg .sk-ramp-head { fill: #e0312a; }
+.cx-ramp-tip { color: #b3241e; font-weight: 700; }
+.cx-ramp-dot { fill: #e0312a; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.cx-ramp-label { fill: #b3241e; font-size: 6px; font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 1.2px; }
+.sk-ramp-area, .cx-draw-svg .sk-ramp-area { fill: rgba(224, 49, 42, 0.14); stroke: #e0312a; stroke-dasharray: 4 3; }
+.cx-ramp-arrow { stroke: #e0312a; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.cx-ramp-head { fill: #e0312a; }
+#sketch-rect.on { background: #1f4e79; color: #fff; }
+
+@keyframes sk-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.15; } }
+.sk-active, .cx-draw-svg .sk-active { fill: none; stroke: #e0312a; stroke-linecap: round; animation: sk-blink 0.9s step-end infinite; }
+.sk-dyn rect { fill: #fff; stroke: #1f4e79; }
+.sk-dyn text { fill: #1f2a36; font-family: ui-monospace, monospace; }
+.sk-caret { animation: sk-blink 0.9s step-end infinite; fill: #1f4e79; }
+
+/* 외곽 그리기 막대: 그림 버튼 + 가까이 가면 이름표 */
+.icon-btn { position: relative; width: 38px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
+.icon-btn svg { display: block; }
+.icon-btn.on { background: #1f4e79; color: #fff; }
+.icon-btn[data-tip]:hover::after, .icon-btn[data-tip]:focus-visible::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  white-space: nowrap; background: #2b2620; color: #fff; font-size: 12px; padding: 5px 8px; border-radius: 6px; z-index: 30; pointer-events: none;
+}
+.icon-btn[data-tip]:hover::before {
+  content: ""; position: absolute; top: calc(100% + 1px); left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-bottom-color: #2b2620; z-index: 30;
+}
+.icon-btn:disabled { opacity: 0.4; }

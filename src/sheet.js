@@ -1,6 +1,6 @@
-import { outlineProblem } from "./outline.js?v=264";
-import { chargerRect, stallTag } from "./stallMarks.js?v=264";
-import { AISLE, RAMP_SLOPE_STRAIGHT, clearHeightOf, rampFootprint, siteMarginsOf, rampMainSlope, rampShape, rampTransitions } from "./layout.js?v=264";
+import { outlineProblem } from "./outline.js?v=306";
+import { chargerRect, stallTag } from "./stallMarks.js?v=306";
+import { AISLE, RAMP_SLOPE_STRAIGHT, clearHeightOf, rampFootprint, siteMarginsOf, rampMainSlope, rampShape, rampTransitions } from "./layout.js?v=306";
 
 const EDGE = { n: "북", e: "동", s: "남", w: "서" };
 
@@ -182,7 +182,9 @@ export function renderSheet(paint, state, info, floorIndex) {
     ["법정 대수", `${info.required}대`],
     ["배치 대수", `${info.placed}대`],
     ["지하층", `${info.floors}층`],
-    ["층고", plate.floorHeight ? `${plate.floorHeight}m (유효 ${clearHeightOf(plate.floorHeight)}m ≥ ${plate.clearRequired || 2.3}m)` : "—"],
+    ["층고", plate.floorHeights && plate.floorHeights.length
+      ? `${plate.floorHeights.map((h, i) => `B${i + 1} ${h}m`).join(" · ")} (최저 유효 ${clearHeightOf(Math.min(...plate.floorHeights))}m ≥ ${plate.clearRequired || 2.3}m · 램프는 최고 ${Math.max(...plate.floorHeights)}m 기준, 도착 끝 맞춤)`
+      : plate.floorHeight ? `${plate.floorHeight}m (유효 ${clearHeightOf(plate.floorHeight)}m ≥ ${plate.clearRequired || 2.3}m)` : "—"],
     ["장애인", info.stallTypes ? `${info.stallTypes.disabled}칸 (칸 안 '장')` : "—"],
     ["확장형", info.stallTypes && info.stallTypes.extended ? `${info.stallTypes.extended}칸 2.6×5.2m (굵은 선 '확')` : "—"],
     ["전기차", info.stallTypes && info.stallTypes.eco ? `${info.stallTypes.eco}칸 (칸 안 '전기', 검은 상자=충전기)` : "—"],

@@ -6,7 +6,7 @@ import {
   uses,
   zoneFactors,
   zoneUseStatus,
-} from "./parkingRules.js?v=264";
+} from "./parkingRules.js?v=306";
 
 export function emptyDemand() {
   return {
@@ -153,7 +153,7 @@ export function calculateDemand(demand, plate, spacing = 8) {
   const totalArea = legalStalls * areaPerStall;
   const plannedFloors = Math.max(1, Math.round(Number(source.plannedFloors) || 1));
   const floorArea = legalStalls ? totalArea / plannedFloors : 0;
-  const actualArea = plate ? plate.width * plate.depth : 0;
+  const actualArea = plate ? (plate.outline && plate.outline.length >= 3 ? Math.abs(plate.outline.reduce((sum, [x, y], i, a) => { const [x2, y2] = a[(i + 1) % a.length]; return sum + x * y2 - x2 * y; }, 0)) / 2 : plate.width * plate.depth) : 0;
   const neededFloors = actualArea > 0 && legalStalls ? Math.max(1, Math.ceil(totalArea / actualArea)) : plannedFloors;
   // 친환경차 전용주차구역 대상(친환경자동차법 시행령 제18조의5): 총주차대수 50대 이상 +
   // 100세대 이상 아파트 또는 공중이용시설(업무·판매·숙박·문화·의료·위락). 근생·오피스텔·연립·다세대만이면 대상 아님.

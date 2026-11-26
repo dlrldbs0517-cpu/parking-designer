@@ -1,11 +1,15 @@
-import { outlineProblem } from "./outline.js?v=264";
-import { chargerRect } from "./stallMarks.js?v=264";
+import { outlineProblem } from "./outline.js?v=306";
+import { chargerRect } from "./stallMarks.js?v=306";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape } from "./layout.js?v=264";
+import { CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, RAMP_INSET, WALL_T, rampFootprint, rampShape, minStraightRampLength, rampTransitions } from "./layout.js?v=306";
 // 층고는 입력값(state.plate.floorHeight)을 쓴다
-const floorH = () => (state.plate && state.plate.floorHeight) || FLOOR_H;
-import { state, subscribe, summary } from "./state.js?v=264";
+// 층별 층고: 지금 그리는 층의 층고(curH). 층마다 다르면 rebuild가 층마다 바꿔 넣는다.
+let curH = null;
+const floorH = () => curH || (state.plate && state.plate.floorHeight) || FLOOR_H;
+// 램프 높은 끝(도로 쪽)에서 평평하게 두는 비율 — 층고가 낮은 층은 도착 끝을 맞추고 위쪽을 평평하게
+let rampFlatFrac = 0;
+import { state, subscribe, summary, floorHeightList } from "./state.js?v=306";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -119,8 +123,16 @@ function rebuild(sun) {
   const outMat = standard("#b5522a", 0.45);
 
   const levels = single ? [Math.max(0, Math.min(drawn - 1, state.floorView))] : [...Array(drawn).keys()];
+  const heights = floorHeightList(drawn, plate);
+  const perFloor = !!(plate.floorHeights && plate.floorHeights.length);
+  const bases = heights.map((_, k) => -heights.slice(1, k + 1).reduce((a, b) => a + b, 0));
+  const total = heights.slice(1).reduce((a, b) => a + b, 0);
   levels.forEach((level) => {
-    const base = single ? 0 : -level * floorH();
+    const base = single ? 0 : bases[level];
+    curH = heights[level];
+    // 이 층 램프에 필요한 길이 vs 실제(가장 높은 층고 기준) 길이 → 남는 만큼 위쪽 평탄
+    const need = minStraightRampLength(curH, rampTransitions(plate));
+    rampFlatFrac = perFloor ? Math.max(0, 1 - need / Math.max(need, (state.ramps[0] && state.ramps[0].length) || need)) : 0;
     const floor = new THREE.Group();
     building.add(floor);
     host = floor;
@@ -143,11 +155,14 @@ function rebuild(sun) {
   });
 
   host = building;
+  curH = heights[0];
+  rampFlatFrac = 0;
   if (!single) {
     addGrade(plate);
     addLabel("지상", plate.width / 2, floorH() + 1.2, -3);
   }
-  if (floors > drawn) addLabel(`외 ${floors - drawn}개 층`, plate.width + 8, -drawn * floorH() / 2, plate.depth / 2);
+  if (floors > drawn) addLabel(`외 ${floors - drawn}개 층`, plate.width + 8, -(total + heights[0]) / 2, plate.depth / 2);
+  curH = null;
 
   const stack = single ? 1 : drawn;
   const rampReach = state.ramps.reduce((reach, ramp) => {
@@ -322,6 +337,31 @@ function addRamp(ramp, material, base, hazard) {
   const footprint = rampFootprint(ramp, state.plate);
   const low = base + 0.12;
   const high = base + floorH();
+  if (rampFlatFrac > 0.001) {
+    // 층고가 낮은 층: 높은 끝(도로 쪽)부터 평탄 → 경사, 아래층 도착 끝은 모든 층이 같은 자리
+    const f = rampFlatFrac;
+    const P = (u, v, h) => {
+      if (ramp.edge === "s") return [footprint.x + v * footprint.w, h, footprint.y + u * footprint.d];
+      if (ramp.edge === "n") return [footprint.x + v * footprint.w, h, footprint.y + footprint.d - u * footprint.d];
+      if (ramp.edge === "w") return [footprint.x + u * footprint.w, h, footprint.y + v * footprint.d];
+      return [footprint.x + footprint.w - u * footprint.w, h, footprint.y + v * footprint.d];
+    };
+    const quads = [[0, f, high, high], [f, 1, high, low]];
+    const arr = [];
+    quads.forEach(([u0, u1, h0, h1]) => {
+      const a = P(u0, 0, h0); const b = P(u0, 1, h0); const c = P(u1, 1, h1); const d = P(u1, 0, h1);
+      arr.push(...a, ...b, ...c, ...a, ...c, ...d);
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(arr), 3));
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    host.add(mesh);
+    addRampEdges(ramp, footprint, base, hazard);
+    return;
+  }
   let corners;
   if (ramp.edge === "s") {
     corners = [
@@ -695,7 +735,9 @@ function addRampEdges(ramp, footprint, base, hazard) {
   const alongX = ramp.edge === "n" || ramp.edge === "s";
   for (let index = 0; index < samples; index += 1) {
     const t = (index + 0.5) / samples;
-    const height = (outerHigh ? high : low) + ((outerHigh ? low : high) - (outerHigh ? high : low)) * t;
+    const u = outerHigh ? t : 1 - t;   // 높은 끝에서 0
+    const f = rampFlatFrac;
+    const height = u <= f ? high : high - (high - low) * ((u - f) / Math.max(1e-6, 1 - f));
     if (alongX) {
       const z = footprint.y + footprint.d * t;
       slopedPiece(footprint.x + CURB_W / 2, height, z, CURB_W, footprint.d / samples, CURB_H, curb);

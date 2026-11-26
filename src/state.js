@@ -1,5 +1,5 @@
-import { outlineProblem, bboxOf } from "./outline.js?v=264";
-import { calculateDemand, emptyDemand } from "./demand.js?v=264";
+import { outlineProblem, bboxOf } from "./outline.js?v=306";
+import { calculateDemand, emptyDemand } from "./demand.js?v=306";
 import {
   basementCount,
   clampCore,
@@ -16,7 +16,7 @@ import {
   referenceCase,
   searchPlacement,
   snapCore,
-} from "./layout.js?v=264";
+} from "./layout.js?v=306";
 
 export const state = {
   step: 1,
@@ -38,8 +38,8 @@ export const state = {
   siteMargins: { n: null, s: null, e: null, w: null },
   roadEdge: "w",   // 도로에 접한 변: 램프·출입구를 이 변에 둔다
   noCore: false,   // 사용자가 코어를 모두 지운 상태(평면 만들기 때 기본 코어를 다시 넣지 않음)
-  coreAuto: true,  // 평면 만들기 때 코어 자리를 자동 탐색(평면에서 코어를 직접 옮기면 끔)
-  rampPos: "auto", // 그 변 안 램프 위치: auto(대수 최대) · start(서/남 끝) · mid · end(동/북 끝)   // 방향별 대지 여유(비우면 공통 값)
+  coreAuto: false,  // 평면 만들기 때 코어 자리 자동 탐색 여부. 기본 끔(오래 걸림) — 평면에서 끌어 옮기거나 "코어 자리 자동 찾기" 버튼으로
+  rampPos: "start", // 기본은 직접 지정(자동은 세 자리를 다 짜 봐서 오래 걸림). 그 변 안 램프 위치: auto(대수 최대) · start(서/남 끝) · mid · end(동/북 끝)   // 방향별 대지 여유(비우면 공통 값)
   // 장애인전용 주차구획. 적용 대상인지는 법정 대수(10대 이상)로 판단한다.
   stallRules: { disabled: true, disabledRate: 0.03, ecoMode: "auto", ecoRate: 0.05, parallel: true },
   rampPlacement: "internal",
@@ -51,6 +51,8 @@ export const state = {
   // 도로와 접하는 부분부터 3m는 8.5% 이하 (주차장법 시행규칙 제6조①5바)
   // 층고(m). 유효높이 = 층고 − 슬래브 0.28m가 차로 기준 2.3m 이상이어야 한다.
   floorHeight: 3.2,
+  // 층마다 층고가 다르면 [B1, B2, …] (m). null이면 모든 층 floorHeight. 켜져 있으면 floorHeight = 가장 높은 층고(램프 길이 기준).
+  floorHeights: null,
   noGroundAccess: true,   // 공동주택: 지상에 동별 차량 접근 없음(지상공원형) → 지하 차로 높이 2.7m
   // 기둥 간격을 가로·세로 따로 쓸 때 (예: "8.1,8.4,9"). 비우면 columnSpacing 하나로.
   spansX: "",
@@ -129,6 +131,7 @@ export function plateFromState() {
     spansY: parseSpans(state.spansY).values,
     trimDeadEnds: state.trimDeadEnds,
     floorHeight: state.floorHeight,
+    floorHeights: state.floorHeights && state.floorHeights.length ? state.floorHeights.slice() : null,
     // 경사로 완화구간 기준(별표 1)은 법정 주차대수로 판단한다
     legalStalls: calculateDemand(state.demand, null, state.columnSpacing).legalStalls,
   };
@@ -250,13 +253,19 @@ export function rebuildLayout() {
 
 // 도로변에 내부 램프가 어느 위치에도 안 들어가면(예: 긴 변이 도로인데 깊이가 짧음) 옆 변의 도로 쪽 끝으로 옮긴다.
 export function rampFallback(plate = state.plate) {
-  if (state.rampPlacement !== "internal" || !plate) return null;
+  if (state.rampPlacement !== "internal" || !plate || state.rampStart) return null;
   const road = state.roadEdge || "w";
-  const check = (edge) => {
-    try { return rampPositionCheck({ ...plate, roadEdge: edge }, state.rampPlacement, state.floorHeight); } catch (error) { return {}; }
+  const check = (edge, positions, stop) => {
+    try { return rampPositionCheck({ ...plate, roadEdge: edge }, state.rampPlacement, state.floorHeight, positions, stop); } catch (error) { return {}; }
   };
-  const here = check(road);
-  if (["start", "mid", "end"].some((pos) => !here[pos])) return null;
+  // 고른 자리부터 보고, 하나라도 들어가면 바로 끝(세 자리를 다 짜 보지 않음 — 속도용)
+  const first = ["start", "mid", "end"].includes(state.rampPos) ? state.rampPos : "start";
+  const order = [first].concat(["start", "mid", "end"].filter((p) => p !== first));
+  const here = check(road, order, true);
+  if (!here[first]) return null;   // 고른 자리에 들어감
+  const okHere = order.find((pos) => pos in here && !here[pos]);
+  // 고른 자리만 안 되면 같은 도로변의 들어가는 자리로(자동이 아닐 때 안내)
+  if (okHere) return state.rampPos === "auto" ? null : { edge: road, pos: okHere, reason: here[first], sameEdge: true, from: first };
   const options = {
     s: [["w", "start"], ["e", "start"]],
     n: [["w", "end"], ["e", "end"]],
@@ -264,17 +273,38 @@ export function rampFallback(plate = state.plate) {
     e: [["s", "end"], ["n", "end"]],
   }[road];
   for (const [edge, pos] of options) {
-    const c = check(edge);
+    const c = check(edge, [pos], false);
     if (!c[pos]) return { edge, pos, reason: here.mid || here.start };
   }
   return null;
 }
 
 function seedAccess() {
+  // 사용자가 외곽 그리기에서 램프 시작점을 직접 찍었으면 그 자리 그대로(엔진이 옮기지 않음)
+  if (state.rampStart) {
+    const rs = state.rampStart;
+    state.accessNote = null;
+    state.roadEdge = rs.edge;
+    const keepId = state.ramps.length ? state.ramps[0].id : state.nextId++;
+    state.ramps = [{
+      id: keepId,
+      edge: rs.edge,
+      t: rs.t,
+      pos: null,
+      offset: rs.offset == null ? undefined : rs.offset,
+      fixed: true,
+      width: state.rampWidth,
+      length: defaultRampLength(state.plate, rs.edge),   // 길이는 층고·법정 경사로 자동
+      placement: state.rampPlacement,
+    }];
+    return;
+  }
   // 램프는 조건 단계에서 고른 도로 접한 변의 가운데에서 시작한다(배치안이 그 변 안에서 위치를 다듬음).
   // 도로변에 안 들어가면 옆 변의 도로 쪽 끝(rampFallback).
   const fallback = rampFallback();
-  state.accessNote = fallback
+  state.accessNote = fallback && fallback.sameEdge
+    ? `고른 램프 자리(${POS_NAME[fallback.from]})에는 램프가 들어가지 않아(${fallback.reason}) 같은 도로변 ${POS_NAME[fallback.pos]}에 두었습니다.`
+    : fallback
     ? `${EDGE_NAME[state.roadEdge]}(도로변)은 ${fallback.reason || "길이 부족"}로 내부 램프가 들어가지 않아, ${EDGE_NAME[fallback.edge]} 변의 도로 쪽 끝에 램프를 두었습니다.`
     : null;
   const edge = fallback ? fallback.edge : (state.roadEdge || "w");
@@ -296,6 +326,7 @@ function seedAccess() {
   }
 }
 const EDGE_NAME = { n: "북측", s: "남측", e: "동측", w: "서측" };
+const POS_NAME = { start: "처음 쪽 끝", mid: "가운데", end: "반대쪽 끝" };
 
 
 // 코어 자리 자동 탐색: 기둥 격자 칸을 모두 돌려 보고, 지금 자리보다 추천안 대수가 많으면 옮긴다.
@@ -335,11 +366,15 @@ export function autoPlaceCore() {
   state.coreAuto = true;
   refreshVariants();
   searchCore();
+  state.coreAuto = false;   // 버튼으로 한 번만 찾음(다음 평면 만들기 때 또 돌지 않게)
+  state.coreFound = true;
   const best = Math.max(0, state.variants.findIndex((variant) => variant.recommended));
   applyVariant(best);
 }
 
 export function generatePlate() {
+  // 램프 시작점을 찍었으면 도로 접한 변은 그 벽(평면의 도로 쪽 처리도 같은 변으로)
+  if (state.rampStart) state.roadEdge = state.rampStart.edge;
   state.plate = plateFromState();
   // 램프 길이는 층고·법정 대수(완화구간)로 정한 최소 길이보다 짧으면 안 된다.
   const autoLength = minStraightRampLength(state.floorHeight, rampTransitions({ legalStalls: state.plate.legalStalls }));
@@ -359,7 +394,7 @@ export function generatePlate() {
   syncCore();
   seedAccess();
   state.referenceNotes = [];
-  const autoPos = state.rampPos === "auto" && !state.accessNote;
+  const autoPos = state.rampPos === "auto" && !state.accessNote && !state.rampStart;
   refreshVariants(false, autoPos);
   if (autoPos) {
     // 도로변 안에서 끝·가운데·끝을 모두 돌려 보고 추천안 대수가 가장 많은 위치를 쓴다.
@@ -820,4 +855,13 @@ export function setCoreDoor(face) {
   syncCore();
   rebuildLayout();
   emit();
+}
+
+// 층별 층고: n개 층의 층고 목록(B1부터). 층별 입력이 없거나 모자라면 기본 층고/마지막 입력값.
+export function floorHeightList(n, plate = null) {
+  const src = plate ? plate.floorHeights : state.floorHeights;
+  const base = plate ? plate.floorHeight : state.floorHeight;
+  const out = [];
+  for (let i = 0; i < n; i += 1) out.push(src && src.length ? Number(src[Math.min(i, src.length - 1)]) || base : base);
+  return out;
 }

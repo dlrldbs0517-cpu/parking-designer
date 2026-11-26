@@ -397,15 +397,21 @@ export function walkField(ctx) {
   const inside = (r, x, y, pad = 0) => x > r.x - pad && x < r.x + r.w + pad && y > r.y - pad && y < r.y + r.d + pad;
   const aisles = ctx.aisles || [];
   const solids = (ctx.columns || []).map((c) => ({ ...c, pad: 0.1 })).concat((ctx.cores || []).map((c) => ({ ...c, pad: 0 })));
-  for (let j = 0; j < ny; j += 1) {
-    for (let i = 0; i < nx; i += 1) {
-      const x = (i + 0.5) * h;
+  // 사각형마다 덮는 칸만 칠함(칸 전체 × 사각형 전체를 다 보던 것보다 훨씬 빠름, 결과는 같음)
+  const paint = (r, pad, val) => {
+    const i0 = Math.max(0, Math.floor((r.x - pad) / h - 0.5) - 1);
+    const i1 = Math.min(nx - 1, Math.ceil((r.x + r.w + pad) / h - 0.5) + 1);
+    const j0 = Math.max(0, Math.floor((r.y - pad) / h - 0.5) - 1);
+    const j1 = Math.min(ny - 1, Math.ceil((r.y + r.d + pad) / h - 0.5) + 1);
+    for (let j = j0; j <= j1; j += 1) {
       const y = (j + 0.5) * h;
-      if (!aisles.some((a) => inside(a, x, y))) continue;
-      if (solids.some((r) => inside(r, x, y, r.pad))) continue;
-      ok[j * nx + i] = 1;
+      for (let i = i0; i <= i1; i += 1) {
+        if (inside(r, (i + 0.5) * h, y, pad)) ok[j * nx + i] = val;
+      }
     }
-  }
+  };
+  aisles.forEach((a) => paint(a, 0, 1));
+  solids.forEach((r) => paint(r, r.pad, 0));
   const cellOf = (p) => ({ i: Math.min(nx - 1, Math.max(0, Math.floor(p.x / h))), j: Math.min(ny - 1, Math.max(0, Math.floor(p.y / h))) });
   // 점에서 가장 가까운 걸을 수 있는 칸(반경 r m 안)
   const nearest = (p, r) => {

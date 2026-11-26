@@ -1,8 +1,8 @@
 // CAD(DXF) 내보내기 — AutoCAD·ZWCAD 등에서 바로 열리는 R12(AC1009) ASCII DXF.
 // 단위 mm, 실제 크기(1:1), 평면 좌표 그대로(원점 = 주차장 왼쪽 아래 모서리, y 위 = 북).
 // 레이어로 나눠서 CAD에서 끄고 켜거나 색을 바꿀 수 있게 한다. 한글은 \U+XXXX로 적어 글꼴(맑은 고딕)로 표시.
-import { rampShape } from "./layout.js?v=264";
-import { chargerRect, boltPoints, stallTag } from "./stallMarks.js?v=264";
+import { rampShape } from "./layout.js?v=306";
+import { chargerRect, boltPoints, stallTag } from "./stallMarks.js?v=306";
 
 const MM = 1000;
 

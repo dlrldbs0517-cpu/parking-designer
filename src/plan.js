@@ -1,7 +1,7 @@
-import { outlineProblem } from "./outline.js?v=264";
-import { chargerRect, boltPoints, stallTag } from "./stallMarks.js?v=264";
-import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=264";
-import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=264";
+import { outlineProblem } from "./outline.js?v=306";
+import { chargerRect, boltPoints, stallTag } from "./stallMarks.js?v=306";
+import { edgePoint, pickEdge, rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=306";
+import { moveOpening, moveRamp, placeOpening, placeRamp, selectCore, selectItem, settleAfterDrag, state, subscribe, updateCore } from "./state.js?v=306";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -36,9 +36,7 @@ export function mountPlan(canvas) {
     ctx.fillStyle = "#e7e1d6";
     ctx.fillRect(0, 0, rect.width, rect.height);
     if (!state.plate) {
-      ctx.fillStyle = "#6f675f";
-      ctx.font = "16px Segoe UI, Malgun Gothic, sans-serif";
-      ctx.fillText("가로, 세로, 기둥 간격을 입력하면 차로와 주차구획이 놓입니다.", 28, 48);
+      drawPreview(ctx, rect);
       return;
     }
     const key = `${state.plate.width}x${state.plate.depth}:${state.overlay.mode}:${Math.round(rect.width)}x${Math.round(rect.height)}`;
@@ -719,4 +717,79 @@ function visibleOpenings() {
 
 function validOutline(plate) {
   return plate && plate.outline && !outlineProblem(plate.outline) ? plate.outline : null;
+}
+
+// 평면 만들기 전: 지금 정한 주차장 모양(그린 외곽 또는 가로×세로 직사각형)만 미리 보여 준다(배치 계산 없음).
+function drawPreview(ctx, rect) {
+  // 아직 외곽을 그리거나 크기를 직접 넣지 않았으면 안내만(기본 48×42 사각형은 띄우지 않음)
+  if (!state.outline && !state.sizeSet) {
+    ctx.fillStyle = "#6f675f";
+    ctx.font = "16px Segoe UI, Malgun Gothic, sans-serif";
+    ctx.fillText("주차장 외곽을 그리거나 '법정 대수로 크기 추천'을 누르세요.", 28, 48);
+    return;
+  }
+  const pts = state.outline && state.outline.length >= 3 ? state.outline
+    : [[0, 0], [state.parkWidth, 0], [state.parkWidth, state.parkDepth], [0, state.parkDepth]];
+  ctx.fillStyle = "#6f675f";
+  ctx.font = "15px Segoe UI, Malgun Gothic, sans-serif";
+  ctx.fillText(state.outline ? "그린 주차장 외곽 — 조건을 다 넣고 '평면 만들기'를 누르면 배치를 계산합니다." : "주차장 크기 — 조건을 다 넣고 '평면 만들기'를 누르면 배치를 계산합니다.", 28, 40);
+  const xs = pts.map((p) => p[0]); const ys = pts.map((p) => p[1]);
+  const W = Math.max(...xs) - Math.min(...xs); const D = Math.max(...ys) - Math.min(...ys);
+  if (!(W > 0 && D > 0)) return;
+  const pad = 70; const top = 70;
+  const k = Math.min((rect.width - pad * 2) / W, (rect.height - top - pad) / D);
+  const ox = (rect.width - W * k) / 2 - Math.min(...xs) * k;
+  const oy = top + (rect.height - top - pad + D * k) / 2 + Math.min(...ys) * k;
+  const P = ([x, y]) => [ox + x * k, oy - y * k];
+  ctx.beginPath();
+  pts.forEach((p, i) => { const [a, b] = P(p); if (i) ctx.lineTo(a, b); else ctx.moveTo(a, b); });
+  ctx.closePath();
+  ctx.fillStyle = "#fbfaf7";
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#3d3832";
+  ctx.stroke();
+  ctx.fillStyle = "#1f4e79";
+  ctx.font = "12px Segoe UI, Malgun Gothic, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const ccw = pts.reduce((sum, [x, y], i) => { const [x2, y2] = pts[(i + 1) % pts.length]; return sum + x * y2 - x2 * y; }, 0) > 0;
+  pts.forEach((p, i) => {
+    const q = pts[(i + 1) % pts.length];
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (len * k < 30) return;
+    // 바깥쪽 법선 방향으로 글자를 띄움
+    let nx = (q[1] - p[1]) / len; let ny = -(q[0] - p[0]) / len;
+    if (!ccw) { nx = -nx; ny = -ny; }
+    const label = `${+len.toFixed(2)}m`;
+    const off = (10 + Math.abs(nx) * ctx.measureText(label).width / 2 + Math.abs(ny) * 4) / k;
+    const [a, b] = P([(p[0] + q[0]) / 2 + nx * off, (p[1] + q[1]) / 2 + ny * off]);
+    ctx.fillText(label, a, b);
+  });
+  // 램프 시작점(빨간 원)
+  const rs = state.rampStart;
+  if (rs) {
+    const W = state.parkWidth; const D = state.parkDepth; const off = rs.offset || 0;
+    const rp = rs.p ? rs.p : rs.edge === "s" ? [rs.t, off] : rs.edge === "n" ? [rs.t, D - off] : rs.edge === "w" ? [off, rs.t] : [W - off, rs.t];
+    const [a, b] = P(rp);
+    // 방향 화살표(찍은 지점까지, 없으면 8m)
+    const dir = rs.dir || ({ s: "n", n: "s", w: "e", e: "w" })[rs.edge];
+    const v = { n: [0, 1], s: [0, -1], e: [1, 0], w: [-1, 0] }[dir];
+    const tp = rs.tip || [rp[0] + v[0] * 8, rp[1] + v[1] * 8];
+    const [ta, tb] = P(tp);
+    const ang = Math.atan2(tb - b, ta - a);
+    ctx.strokeStyle = "#e0312a"; ctx.fillStyle = "#e0312a"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(ta, tb); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ta, tb);
+    ctx.lineTo(ta - 11 * Math.cos(ang - 0.45), tb - 11 * Math.sin(ang - 0.45));
+    ctx.lineTo(ta - 11 * Math.cos(ang + 0.45), tb - 11 * Math.sin(ang + 0.45));
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(a, b, 8, 0, Math.PI * 2);
+    ctx.fillStyle = "#e0312a"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#fff"; ctx.stroke();
+    ctx.fillStyle = "#b3241e"; ctx.font = "bold 12px Segoe UI, Malgun Gothic, sans-serif"; ctx.textAlign = "left";
+    ctx.textBaseline = "middle"; ctx.lineWidth = 4; ctx.strokeStyle = "#fbfaf7";
+    ctx.strokeText("램프 시작", a + 12, b - 12); ctx.fillText("램프 시작", a + 12, b - 12);
+  }
+  ctx.textAlign = "start";
+  ctx.textBaseline = "alphabetic";
 }

@@ -2,7 +2,7 @@
 // 2D(평면) 또는 3D(높이만큼 세운 매스)로 보여 준다. 지도는 Leaflet(전역 L) + 브이월드 WMTS 타일.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=264";
+import { MAX_FEATURES, WMTS, boxAround, boxSize, buildingHeight, heightEstimated, isRoadParcel, lineParts, realRoads, localizer, outerRings, storyHeight, surroundingsBox } from "./zoning.js?v=306";
 
 const $ = (id) => document.getElementById(id);
 const MAX_SIDE = 1000;   // 영역 한 변 최대(m). 브이월드가 레이어당 1,000개까지만 준다.
@@ -264,6 +264,19 @@ function renderOutline() {
     const dx = (draw.shown.center.x - draw.center.x) * kx;
     const dy = (draw.shown.center.y - draw.center.y) * 110540;
     html += `<polygon points="${toSvgPts(draw.shown.pts.map(([x, y]) => [x + dx, y + dy]))}" class="cx-outline-poly"/>`;
+    // 램프 시작점(빨간 원)
+    if (draw.shown.ramp && draw.shown.rampTip) {
+      const ax = draw.shown.ramp[0] + dx; const ay = draw.shown.ramp[1] + dy;
+      const bx = draw.shown.rampTip[0] + dx; const by = draw.shown.rampTip[1] + dy;
+      const len = Math.hypot(bx - ax, by - ay) || 1; const ux = (bx - ax) / len; const uy = (by - ay) / len; const h = Math.min(3, len * 0.35);
+      const w1 = [bx - h * (ux * Math.cos(0.45) - uy * Math.sin(0.45)), by - h * (uy * Math.cos(0.45) + ux * Math.sin(0.45))];
+      const w2 = [bx - h * (ux * Math.cos(0.45) + uy * Math.sin(0.45)), by - h * (uy * Math.cos(0.45) - ux * Math.sin(0.45))];
+      html += `<line x1="${ax}" y1="${-ay}" x2="${bx}" y2="${-by}" class="cx-ramp-arrow"/><polygon points="${bx},${-by} ${w1[0]},${-w1[1]} ${w2[0]},${-w2[1]}" class="cx-ramp-head"/>`;
+    }
+    if (draw.shown.ramp) {
+      const rx = draw.shown.ramp[0] + dx; const ry = draw.shown.ramp[1] + dy;
+      html += `<circle cx="${rx}" cy="${-ry}" r="3" class="cx-ramp-dot"/><text x="${rx + 4}" y="${-ry - 3}" class="cx-ramp-label">램프 시작</text>`;
+    }
   }
   g.innerHTML = html;
 }
@@ -292,7 +305,9 @@ export function startOutlineDraw(onDone) {
 export function showOutline(geo) {
   draw.shown = geo && geo.pts && geo.pts.length >= 3 ? geo : null;
   renderOutline();
+  showOutlineOnMap();
 }
+export function showContextMap() { if (ctx && !$("context-view").hidden) setMode("map"); }
 export function contextCenter() {
   return ctx ? { x: ctx.point.x, y: ctx.point.y } : null;
 }
@@ -414,6 +429,32 @@ function draw3d(model) {
     const pts = ring.map(([x, y]) => new THREE.Vector3(x, 0.12, -y));
     scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), siteEdge));
   });
+  // 그린 주차장 외곽(파란 선) + 램프 시작점(빨간 공)
+  const og = draw.shown;
+  if (og && og.center && og.pts && og.pts.length >= 3) {
+    const kx = 111320 * Math.cos((og.center.y * Math.PI) / 180);
+    const ky = 110540;
+    const loc = ([x, y]) => model.toLocal([og.center.x + x / kx, og.center.y + y / ky]);
+    const pts = og.pts.map((q) => { const [x, y] = loc(q); return new THREE.Vector3(x, 0.4, -y); });
+    scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x1f4e79, linewidth: 2 })));
+    const fill = new THREE.Mesh(new THREE.ShapeGeometry(shapeOf(og.pts.map(loc))), new THREE.MeshBasicMaterial({ color: 0x1f4e79, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
+    fill.rotation.x = -Math.PI / 2;
+    fill.position.y = 0.3;
+    scene.add(fill);
+    if (og.ramp) {
+      const [x, y] = loc(og.ramp);
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(Math.max(1.5, R / 60), 20, 14), new THREE.MeshBasicMaterial({ color: 0xe0312a }));
+      ball.position.set(x, Math.max(1.5, R / 60), -y);
+      scene.add(ball);
+      if (og.rampTip) {
+        const [tx, ty] = loc(og.rampTip);
+        const hgt = Math.max(1.5, R / 60);
+        const dirV = new THREE.Vector3(tx - x, 0, -(ty - y));
+        const len = dirV.length();
+        if (len > 0.5) scene.add(new THREE.ArrowHelper(dirV.normalize(), new THREE.Vector3(x, hgt, -y), len, 0xe0312a, Math.min(4, len * 0.35), Math.min(2.5, len * 0.2)));
+      }
+    }
+  }
   const mat = new THREE.MeshLambertMaterial({ color: 0xc9c4ba });
   const edgeMat = new THREE.LineBasicMaterial({ color: 0x8a8578 });
   model.buildings.forEach((b) => {
@@ -485,8 +526,9 @@ function ensureMap() {
   const L = window.L;
   if (!L) throw new Error("지도 라이브러리(Leaflet)를 불러오지 못했습니다");
   if (map) return map;
-  map = L.map("context-map", { zoomControl: true, attributionControl: true, dragging: false, boxZoom: false, doubleClickZoom: false });
-  const opts = { maxZoom: 19, minZoom: 6, referrerPolicy: "no-referrer", attribution: "© 브이월드(국토교통부)" };
+  map = L.map("context-map", { zoomControl: true, attributionControl: true, dragging: false, boxZoom: false, doubleClickZoom: false, maxZoom: 22, wheelPxPerZoomLevel: 90 });
+  // 타일은 19단계까지, 그 위(외곽을 세밀하게 그릴 때)는 19단계 타일을 확대해서 22단계까지
+  const opts = { maxZoom: 22, maxNativeZoom: 19, minZoom: 6, referrerPolicy: "no-referrer", attribution: "© 브이월드(국토교통부)" };
   const base = L.tileLayer(WMTS("Base"), opts).addTo(map);
   const sat = L.tileLayer(WMTS("Satellite"), opts);
   L.control.layers({ "일반지도": base, "위성사진": sat }, null, { position: "topright" }).addTo(map);
@@ -497,6 +539,7 @@ function ensureMap() {
   let start = null;
   el.addEventListener("mousedown", (e) => {
     if (e.target.closest(".leaflet-control")) return;
+    if (drawHook && drawHook.down(e)) { e.preventDefault(); return; }
     if (e.button === 2) {
       pan = { x: e.clientX, y: e.clientY };
       el.classList.add("panning");
@@ -508,6 +551,7 @@ function ensureMap() {
     }
   });
   window.addEventListener("mousemove", (e) => {
+    if (drawHook) drawHook.move(e);
     if (pan) {
       map.panBy([pan.x - e.clientX, pan.y - e.clientY], { animate: false });
       pan = { x: e.clientX, y: e.clientY };
@@ -516,6 +560,7 @@ function ensureMap() {
     }
   });
   window.addEventListener("mouseup", (e) => {
+    if (drawHook) drawHook.up(e);
     if (pan) { pan = null; el.classList.remove("panning"); }
     if (start) {
       const raw = toBox(L.latLngBounds(start, map.mouseEventToLatLng(e)));
@@ -523,7 +568,79 @@ function ensureMap() {
       finishRect(raw);
     }
   });
+  map.on("move zoom zoomend resize", () => { if (drawHook) drawHook.redraw(); });
   return map;
+}
+
+// ── 지도 위 외곽 그리기(sketch.js가 씀) ──
+// 좌표: 조회 지점(ctx.point) 기준 m. 그림은 지도 위에 겹친 SVG(화면 픽셀)에 그린다.
+let drawHook = null;
+let outlineLayer = null;
+export function mapDrawApi() {
+  if (!ctx) return null;
+  const m = ensureMap();
+  const el = $("context-map");
+  let svg = document.getElementById("cx-draw-svg");
+  if (!svg) {
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.id = "cx-draw-svg";
+    svg.setAttribute("class", "cx-draw-svg");
+    el.appendChild(svg);
+  }
+  const c = ctx.point;
+  const kx = 111320 * Math.cos((c.y * Math.PI) / 180);
+  const ky = 110540;
+  const toMeters = (e) => { const ll = m.mouseEventToLatLng(e); return [(ll.lng - c.x) * kx, (ll.lat - c.y) * ky]; };
+  const toLatLng = ([x, y]) => [c.y + y / ky, c.x + x / kx];
+  return {
+    center: { x: c.x, y: c.y },
+    svg,
+    size: () => ({ w: el.clientWidth, h: el.clientHeight }),
+    toMeters,
+    toScreen: (p) => { const q = m.latLngToContainerPoint(toLatLng(p)); return [q.x, q.y]; },
+    metersPerPixel: () => {
+      const a = m.containerPointToLatLng([0, 0]); const b = m.containerPointToLatLng([100, 0]);
+      return Math.abs((b.lng - a.lng) * kx) / 100 || 0.1;
+    },
+    panBy: (dx, dy) => m.panBy([dx, dy], { animate: false }),
+    fit: (pts) => { if (pts.length) m.fitBounds(window.L.latLngBounds(pts.map(toLatLng)), { padding: [60, 60], animate: false }); },
+    setHook: (hook) => {
+      drawHook = hook;
+      svg.style.display = hook ? "" : "none";
+      el.classList.toggle("drawing", !!hook);
+      $("context-view").classList.toggle("drawing-outline", !!hook);
+      // 그리는 동안 지도 키보드(클릭하면 지도에 초점) 끔 → 숫자 입력이 명령줄로 감
+      if (m.keyboard) { if (hook) { m.keyboard.disable(); el.blur(); } else m.keyboard.enable(); }
+      if (outlineLayer) { if (hook) outlineLayer.remove(); else outlineLayer.addTo(m); }
+    },
+  };
+}
+// 그린 외곽을 지도에 표시(그리기가 끝난 뒤)
+function showOutlineOnMap() {
+  const L = window.L;
+  if (!map || !L) return;
+  if (outlineLayer) { outlineLayer.remove(); outlineLayer = null; }
+  const g = draw.shown;
+  if (!g || !g.center) return;
+  const kx = 111320 * Math.cos((g.center.y * Math.PI) / 180);
+  const ky = 110540;
+  const ll = ([x, y]) => [g.center.y + y / ky, g.center.x + x / kx];
+  outlineLayer = L.layerGroup([L.polygon(g.pts.map(ll), { color: "#1f4e79", weight: 3, fillColor: "#1f4e79", fillOpacity: 0.12, interactive: false })]);
+  // 램프 시작점(빨간 원)
+  if (g.ramp && g.rampTip) {
+    outlineLayer.addLayer(L.polyline([ll(g.ramp), ll(g.rampTip)], { color: "#e0312a", weight: 3, interactive: false }));
+    // 화살촉: 끝점에서 뒤로 비스듬히 두 선
+    const [ax, ay] = g.ramp; const [bx, by] = g.rampTip; const len = Math.hypot(bx - ax, by - ay) || 1;
+    const ux = (bx - ax) / len; const uy = (by - ay) / len; const h = Math.min(3, len * 0.35);
+    const wing = (sgn) => [bx - h * (ux * Math.cos(0.45) - sgn * uy * Math.sin(0.45)), by - h * (uy * Math.cos(0.45) + sgn * ux * Math.sin(0.45))];
+    outlineLayer.addLayer(L.polygon([ll(g.rampTip), ll(wing(1)), ll(wing(-1))], { color: "#e0312a", weight: 1, fillColor: "#e0312a", fillOpacity: 1, interactive: false }));
+  }
+  if (g.ramp) {
+    const dot = L.circleMarker(ll(g.ramp), { radius: 8, color: "#fff", weight: 2.5, fillColor: "#e0312a", fillOpacity: 1, interactive: false });
+    dot.bindTooltip("램프 시작", { permanent: true, direction: "top", offset: [0, -8], className: "cx-tip cx-ramp-tip" });
+    outlineLayer.addLayer(dot);
+  }
+  if (!drawHook) outlineLayer.addTo(map);
 }
 
 let siteLayer = null;
@@ -540,6 +657,7 @@ function showMap() {
     siteLayer = L.geoJSON(ctx.site.geometry, { style: { color: "#c2701f", weight: 3, fillColor: "#e8a25c", fillOpacity: 0.35 }, interactive: false }).addTo(m);
   }
   if (accessLayer) { accessLayer.remove(); accessLayer = null; }
+  showOutlineOnMap();
   marker.unbindTooltip();
   marker.bindTooltip(`대지 · ${(ctx.site && ctx.site.address) || ctx.title || ""}`, { permanent: true, direction: "top", offset: [0, -8], className: "cx-tip" });
   setTimeout(() => {
