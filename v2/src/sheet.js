@@ -1,10 +1,10 @@
-import { chargerRect } from "./stallMarks.js?v=365";
+import { chargerRect } from "./stallMarks.js?v=381";
 import {
   AISLE, FLOOR_H, RAMP_SLOPE_STRAIGHT, coreInterior, coreInteriorOf, pickCoreDoorSide,
   rampFootprint, siteMarginsOf, stairCoreInterior,
-} from "./layout.js?v=365";
-import { buildChain, slopePlan } from "./rampModules.js?v=365";
-import { polygonFromPlate } from "./polygon.js?v=365";
+} from "./layout.js?v=381";
+import { buildChain, slopePlan } from "./rampModules.js?v=381";
+import { polygonFromPlate } from "./polygon.js?v=381";
 
 const EDGE = { n: "북", e: "동", s: "남", w: "서" };
 
@@ -153,11 +153,10 @@ export function renderSheet(paint, state, info, floorIndex) {
         paint.strokeRect(xOf(el.x), yOf(el.y + el.d), el.w * scale, el.d * scale, "#111", 1.2);
         paint.text(xOf(el.x + el.w / 2) - 8, yOf(el.y + el.d / 2), el.label || "EL", 9, "#111");
       });
-      if (interior.stair) {
-        const st = interior.stair;
+      (interior.stairs || (interior.stair ? [interior.stair] : [])).forEach((st) => {
         paint.strokeRect(xOf(st.x), yOf(st.y + st.d), st.w * scale, st.d * scale, "#333", 1.2);
         paint.text(xOf(st.x + st.w / 2) - 10, yOf(st.y + st.d / 2), "계단", 9, "#333");
-      }
+      });
       if (interior.door) {
         const d = interior.door;
         paint.line(

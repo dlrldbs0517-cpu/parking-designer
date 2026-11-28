@@ -1,5 +1,5 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=365";
-import { stallRuleTargets } from "./stallTypes.js?v=365";
+import { calculateDemand, emptyDemand } from "./demand.js?v=381";
+import { stallRuleTargets } from "./stallTypes.js?v=381";
 import {
   basementCount,
   bestLayoutFor,
@@ -27,7 +27,7 @@ import {
   stairCoreInterior,
   towerBlockRects,
   towerTransferNotes,
-} from "./layout.js?v=365";
+} from "./layout.js?v=381";
 import {
   addModule as chainAddModule,
   applyPlateMeta,
@@ -41,7 +41,7 @@ import {
   slopePlan,
   analyzeOnPlate,
   buildChain,
-} from "./rampModules.js?v=365";
+} from "./rampModules.js?v=381";
 import {
   normalizePolygon,
   outsideBlockRects,
@@ -50,7 +50,7 @@ import {
   polygonFromPlate,
   rectPolygon,
   validatePolygon,
-} from "./polygon.js?v=365";
+} from "./polygon.js?v=381";
 
 export const state = {
   step: 1,
@@ -77,6 +77,10 @@ export const state = {
   spansX: "",
   columnAuto: true,
   coreSnap: true,     // 코어를 기둥 격자 칸에 맞춤
+  pruneFragments: true,  // 줄에서 떨어진 1~2대 조각 칸 빼기
+  corePlaced: false,
+  corePreview: null,  // 코어 단계: 고른 크기가 놓일 자리 미리보기(깜빡임)
+  coreFlash: null,    // 코어 단계: 목록에서 고른 코어 잠깐 깜빡임 {index, until}  // 코어 단계: 사용자가 크기 정하고 「코어 놓기」를 눌러야 코어가 생김
   gridOptions: null,  // 코어 단계에서 계산한 기둥 격자 후보 [{cx, cy, stalls, score}]
   gridChosen: -1,
   gridKey: "",   // 기둥 간격 자동: 추천 단계에서 여러 가로·세로 간격(2·3·4대, 섞은 간격)을 돌려 고름
@@ -194,6 +198,7 @@ export function plateFromState() {
     noGroundAccess: Boolean(state.noGroundAccess),
     roadEdge: state.roadEdge || "w",
     rampPos: state.rampPos || "auto",
+    pruneFragments: state.pruneFragments !== false,
     rampPlacement: state.rampPlacement,
     rampForm: state.rampForm || "auto",
     lowerRampForm: state.lowerRampForm || "auto",
@@ -303,6 +308,7 @@ export function syncPlateMeta() {
     lowerRampOverrides: { ...(state.lowerRampOverrides || {}) },
     roadEdge: state.roadEdge || "w",
     rampPos: state.rampPos || "auto",
+    pruneFragments: state.pruneFragments !== false,
   };
 }
 
@@ -674,6 +680,7 @@ export function preparePlateShell(opts = {}) {
     expectTowerW: Math.max(DEFAULT_TOWER_W, ...state.buildings.map((b) => Number(b.tower?.w) || 0)),
     expectTowerD: Math.max(DEFAULT_TOWER_D, ...state.buildings.map((b) => Number(b.tower?.d) || 0)),
   });
+  if (replaceCores && state.siteType !== "complex") state.corePlaced = false;
   if (!state.cores.length) {
     if (state.siteType === "complex" && state.buildings.length) {
       linkBuildingsToCores(defaultCores(complexPlate(), state.buildings.length));
@@ -867,6 +874,22 @@ function bestValid(variants) {
   });
   return best;
 }
+/** 새 코어 후보 자리들을 빠르게 계산해 점수(작업자 여러 개가 나눠서 부름). state.cores = 이미 놓은 코어들 */
+export function scoreCoreSpots(cands) {
+  const others = (state.cores || []).slice();
+  const out = [];
+  (cands || []).forEach((c) => {
+    state.cores = others.concat([{ ...c, kind: "building", grid: true }]);
+    state.coreSet = true;
+    try {
+      refreshVariants(true);
+      const b = bestValid(state.variants);
+      if (b) out.push({ x: c.x, y: c.y, score: b.score, stalls: b.v.metrics.stalls || 0, valid: Boolean(b.v.metrics.valid) });
+    } catch (e) { /* 이 자리는 건너뜀 */ }
+  });
+  state.cores = others;
+  state.gridResults = out;
+}
 /** 조합들을 빠르게 계산해 점수(작업자 여러 개가 나눠서 부름) */
 export function scoreGridBatch(combos) {
   const base = state.plate;
@@ -986,11 +1009,125 @@ export function applyGridChoice(i) {
   state.spansY = opt.cy.seq.join(", ");
   state.plate = { ...state.plate, spansX: opt.cx.seq.slice(), spansY: opt.cy.seq.slice() };
   // 그 격자에서 대수가 잘 나온 코어 자리로 옮겨 놓고(코어 수가 같을 때) 격자 칸에 맞춤 — 그다음 사용자가 옮길 수 있음
-  if (opt.cores && opt.cores.length === state.cores.length) {
+  const sameSize = opt.cores && opt.cores.length === state.cores.length
+    && opt.cores.every((c, k) => Math.abs(c.w - state.cores[k].w) < 0.05 && Math.abs(c.d - state.cores[k].d) < 0.05);
+  if (sameSize) {
     state.cores = opt.cores.map((c, i) => ({ ...state.cores[i], x: c.x, y: c.y, w: c.w, d: c.d }));
     syncCore();   // 엔진이 이미 격자에 맞춘 자리
   } else snapAllCores();
+  if (state.corePlaced) state.coreSet = true;
+  rebuildLayout();
+  emit();
+}
+/** 코어 단계: 코어 크기(m)만 바꿈 — 아직 안 놓았으면 위치 계산 없이 크기만 */
+export function setCoreSize(w, d) {
+  const core = state.cores[state.coreIndex];
+  if (!core) return;
+  const W = Number(w); const D = Number(d);
+  if (!(W >= 3 && W <= 30 && D >= 3 && D <= 30)) return;
+  if (state.corePlaced) { updateCore({ w: W, d: D }); return; }
+  state.cores[state.coreIndex] = { ...core, w: W, d: D };
+  syncCore();
+  emit();
+}
+/** 코어 단계: 정한 크기(m)로 코어 하나 추가 — 크기 그대로 기둥 줄에 맞춰, 다른 코어·램프와 안 겹치는 가까운 자리 */
+function coreSpotFor(W, D) {
+  const fresh = !state.corePlaced;
+  const keep = rampKeepOut(state.ramps, state.plate);
+  const others = fresh ? [] : state.cores.slice();
+  let seed = { x: state.plate.width / 2 - W / 2, y: state.plate.depth / 2 - D / 2 };
+  const opt = state.gridOptions && state.gridOptions[state.gridChosen];
+  if (fresh && opt && opt.cores && opt.cores[0]) {
+    const o = opt.cores[0];
+    seed = { x: o.x + o.w / 2 - W / 2, y: o.y + o.d / 2 - D / 2 };
+  }
+  const core = clampCore({ ...seed, w: W, d: D, kind: "building", grid: true }, state.plate);
+  return clampCore(snapCoreToCells(core, state.plate, keep, others), state.plate);
+}
+/** 「코어 추가」를 누르면 놓일 자리 미리보기(상태는 안 바꿈) */
+export function previewCoreSized(w, d) {
+  if (!state.plate) return null;
+  const W = Number(w); const D = Number(d);
+  if (!(W >= 3 && W <= 30 && D >= 3 && D <= 30)) return null;
+  try { const c = coreSpotFor(W, D); return { x: c.x, y: c.y, w: c.w, d: c.d }; } catch (e) { return null; }
+}
+export function addCoreSized(w, d, spec = null, at = null) {
+  if (!state.plate) return false;
+  const W = Number(w); const D = Number(d);
+  if (!(W >= 3 && W <= 30 && D >= 3 && D <= 30)) return false;
+  const fresh = !state.corePlaced;
+  const core = at ? clampCore({ x: at.x, y: at.y, w: W, d: D, kind: "building", grid: true }, state.plate) : coreSpotFor(W, D);
+  if (spec) core.spec = { ...spec };
+  state.corePreview = null;
+  state.cores = fresh ? [core] : state.cores.concat([core]);
+  state.coreIndex = state.cores.length - 1;
+  state.corePlaced = true;
   state.coreSet = true;
+  syncCore();
+  state.selection = { type: "core", index: state.coreIndex };
+  rebuildLayout();
+  emit();
+  return true;
+}
+/** 고른 코어 안 승강기·계단 크기 정하기 (spec=null이면 자동으로) */
+export function setCoreSpec(index, spec) {
+  const core = state.cores[index];
+  if (!core) return;
+  const next = { ...core };
+  if (spec) next.spec = { ...spec }; else delete next.spec;
+  // 크기가 바뀌면 끌어 옮긴 승강기·계단 자리는 초기화(문 자리는 유지)
+  if (next.interiorEdit) next.interiorEdit = { door: next.interiorEdit.door, items: {} };
+  delete next.interior;
+  state.cores[index] = next;
+  state.coreIndex = index;
+  syncCore();
+  rebuildLayout();
+  emit();
+}
+/** 고른 코어 출입문을 한 면(n·s·e·w) 가운데로 — 승강기·계단은 그 반대쪽 벽에 다시 붙음 */
+export function setCoreDoor(index, side) {
+  const core = state.cores[index];
+  if (!core || !["n", "s", "e", "w"].includes(side)) return;
+  const next = { ...core, interiorEdit: { door: { side, u: 0.5 }, items: {} } };
+  delete next.interior;
+  delete next.doorSide;
+  state.cores[index] = next;
+  state.coreIndex = index;
+  syncCore();
+  rebuildLayout();
+  emit();
+}
+/** 코어 단계: 코어 하나 지우기 — 마지막 하나면 «아직 안 놓음»으로 */
+export function deleteCoreAt(index) {
+  if (!state.cores[index]) return;
+  if (state.cores.length <= 1) {
+    state.corePlaced = false;
+    state.coreSet = false;
+    emit();
+    return;
+  }
+  state.cores.splice(index, 1);
+  state.coreIndex = Math.max(0, Math.min(state.coreIndex, state.cores.length - 1));
+  syncCore();
+  state.selection = { type: "core", index: state.coreIndex };
+  rebuildLayout();
+  emit();
+}
+/** 코어 단계: 「코어 놓기」 — 정한 크기 그대로, 고른 격자에서 대수가 잘 나온 자리 근처 기둥 줄에 맞춰 둠 */
+export function placeCoreNow() {
+  if (!state.plate || !state.cores.length) return;
+  const opt = state.gridOptions && state.gridOptions[state.gridChosen];
+  if (opt && opt.cores && opt.cores.length === state.cores.length) {
+    // 크기는 그대로, 중심만 그 자리로
+    state.cores = state.cores.map((c, k) => {
+      const o = opt.cores[k];
+      return { ...c, x: o.x + o.w / 2 - c.w / 2, y: o.y + o.d / 2 - c.d / 2 };
+    });
+  }
+  snapAllCores();
+  state.corePlaced = true;
+  state.coreSet = true;
+  state.selection = { type: "core", index: state.coreIndex };
   rebuildLayout();
   emit();
 }
@@ -1194,6 +1331,7 @@ export function addCore() {
   const next = placed[placed.length - 1];
   next.kind = "building";
   state.cores.push(clampCore(next, state.plate));
+  state.corePlaced = true;
   state.coreIndex = state.cores.length - 1;
   syncCore();
   rebuildLayout();

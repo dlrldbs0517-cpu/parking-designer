@@ -1353,3 +1353,24 @@ body[data-wizard="1"] #plan, body[data-wizard="2"] #plan, body[data-wizard="3"]:
 .grid-chip span { font-size: 12.5px; color: var(--muted); }
 .grid-chip:hover { border-color: var(--line-strong); }
 .grid-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(15,118,110,0.18); background: #f0fdfa; }
+
+/* 기둥 상세 창: 크기 단계에서 열면 간격 칸 숨김, 코어 단계(직접 입력)에서 열면 안내문 숨김 */
+#column-dialog.no-spans .spans-only { display: none; }
+#column-dialog:not(.no-spans) .no-spans-only { display: none; }
+
+/* 코어 단계: 만든 코어 목록 + 고른 코어 상세 */
+.core-list { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0; }
+.core-list button { border: 1px solid #cbd5e1; background: #fff; border-radius: 999px; padding: 0.3rem 0.75rem; font-size: 0.85rem; cursor: pointer; }
+.core-list button.on { background: #0f766e; color: #fff; border-color: #0f766e; }
+.core-detail { border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.6rem 0.75rem; margin-top: 0.4rem; background: #f8fafc; }
+.core-detail h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+#core-fit-note.error { color: #b91c1c; }
+#core-size-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+#core-size-chips .grid-chip { width: auto; flex: 0 0 auto; padding: 0.3rem 0.55rem; }
+#core-size-chips .grid-chip div { font-size: 0.82rem; }
+#core-size-chips .grid-chip span { font-size: 0.72rem; }
+
+.door-row { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; margin: 0.35rem 0 0.1rem; font-size: 0.85rem; }
+.door-row span { margin-right: 0.2rem; color: #475569; }
+.door-row button.on { background: #0f766e; color: #fff; border-color: #0f766e; }
+.door-row button.nofit { color: #b91c1c; }

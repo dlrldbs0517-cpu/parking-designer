@@ -1,18 +1,19 @@
-import { chargerRect, boltPoints } from "./stallMarks.js?v=365";
+const stairsOf = (it) => (it ? (it.stairs || (it.stair ? [it.stair] : [])) : []);
+import { chargerRect, boltPoints } from "./stallMarks.js?v=381";
 import {
   coreInterior, edgePoint, pickCoreDoorSide, pickEdge, rampFootprint, rampShape,
   rampsForLevel, siteMarginsOf, stairCoreInterior, coreInteriorOf, rampOutsidePlate, coreGridLines, rampKeepOut,
-} from "./layout.js?v=365";
+} from "./layout.js?v=381";
 import {
   analyzeOnPlate, buildChain, slopePlan, usesModuleLayout,
-} from "./rampModules.js?v=365";
+} from "./rampModules.js?v=381";
 import {
   polygonFromPlate, snapPoint, edgeLengths, polygonArea,
-} from "./polygon.js?v=365";
+} from "./polygon.js?v=381";
 import {
   emit, moveLowerRamp, moveOpening, moveRamp, moveRampFree, placeOpening, placeRamp,
   selectCore, selectItem, setParkPolygon, state, subscribe, updateCore,
-} from "./state.js?v=365";
+} from "./state.js?v=381";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -210,7 +211,8 @@ export function mountPlan(canvas) {
 
     let stairNo = 0;
     // 램프 단계(4)에서는 코어를 아직 안 보여 줌 — 코어는 다음 단계에서 놓음
-    const hideCores = typeof document !== "undefined" && document.body.dataset.wizard === "5";
+    const hideCores = typeof document !== "undefined" && (document.body.dataset.wizard === "5"
+      || (document.body.dataset.wizard === "6" && !state.corePlaced && state.siteType !== "complex"));
     (hideCores ? [] : state.cores).forEach((core, index) => {
       const selected = state.selection?.type === "core" && state.coreIndex === index;
       const building = core.buildingId != null
@@ -242,7 +244,7 @@ export function mountPlan(canvas) {
       const interior = coreInteriorOf(core, state.aisles, state.plate?.blockRects);
       if (interior) drawCoreInterior(ctx, interior, camera.scale);
       if (interior && selected && itemSel && itemSel.index === index) {
-        const items = (interior.elevators || []).concat(interior.stair ? [interior.stair] : []);
+        const items = (interior.elevators || []).concat(stairsOf(interior));
         const item = items.find((r) => r.label === itemSel.label);
         if (item) {
           ctx.save();
@@ -295,8 +297,58 @@ export function mountPlan(canvas) {
           const inCore = state.cores.some((c) => x > c.x + 0.05 && x < c.x + c.w - 0.05 && y > c.y + 0.05 && y < c.y + c.d - 0.05);
           if (!inCore) ctx.fillRect(col.x, col.y, cw, cd);
         }));
+        // 기둥 간격 치수: 주차장 밖 위(가로)·오른쪽(세로)
+        {
+          let maxX = plate.width; let maxY = plate.depth;
+          state.ramps.forEach((ramp) => { try { const b = rampFootprint(ramp, plate); maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.d); } catch (e) { /* 없음 */ } });
+          const ty = maxY + 2.4; const tx = maxX + 2.4; const tk = 0.35;
+          const col = "#475569";
+          ctx.strokeStyle = col; ctx.lineWidth = 1 / camera.scale;
+          line(ctx, gx[0], ty, gx[gx.length - 1], ty);
+          gx.forEach((x) => { line(ctx, x, ty - tk, x, ty + tk); line(ctx, x, plate.depth, x, ty - tk); });
+          for (let i = 0; i + 1 < gx.length; i += 1) {
+            const v = gx[i + 1] - gx[i];
+            if (v >= 1.2) label(ctx, `${Math.round(v * 100) / 100}`, (gx[i] + gx[i + 1]) / 2, ty + 1.0, col);
+          }
+          line(ctx, tx, gy[0], tx, gy[gy.length - 1]);
+          gy.forEach((y) => { line(ctx, tx - tk, y, tx + tk, y); line(ctx, plate.width, y, tx - tk, y); });
+          for (let i = 0; i + 1 < gy.length; i += 1) {
+            const v = gy[i + 1] - gy[i];
+            if (v >= 1.2) label(ctx, `${Math.round(v * 100) / 100}`, tx + 1.6, (gy[i] + gy[i + 1]) / 2, col);
+          }
+        }
         ctx.restore();
       } catch (e) { /* 격자 없음 */ }
+    }
+
+    // 코어 단계: 고른 크기 미리보기 · 목록에서 고른 코어 — 반투명으로 깜빡임
+    if (typeof document !== "undefined" && document.body.dataset.wizard === "6") {
+      const now = performance.now();
+      const pulse = 0.5 + 0.5 * Math.sin(now / 170);
+      const pv = state.corePreview;
+      if (pv) {
+        ctx.save();
+        ctx.fillStyle = `rgba(15, 118, 110, ${0.12 + 0.3 * pulse})`;
+        ctx.fillRect(pv.x, pv.y, pv.w, pv.d);
+        ctx.strokeStyle = `rgba(15, 118, 110, ${0.45 + 0.55 * pulse})`;
+        ctx.lineWidth = 2.4 / camera.scale;
+        ctx.setLineDash([6 / camera.scale, 4 / camera.scale]);
+        ctx.strokeRect(pv.x, pv.y, pv.w, pv.d);
+        ctx.setLineDash([]);
+        label(ctx, `${Math.round(pv.w * 10) / 10} × ${Math.round(pv.d * 10) / 10}m`, pv.x + pv.w / 2, pv.y + pv.d / 2, "#0f766e");
+        ctx.restore();
+      }
+      const fl = state.coreFlash;
+      const fc = fl && now < fl.until ? state.cores[fl.index] : null;
+      if (fc) {
+        ctx.save();
+        ctx.fillStyle = `rgba(234, 179, 8, ${0.1 + 0.35 * pulse})`;
+        ctx.fillRect(fc.x, fc.y, fc.w, fc.d);
+        ctx.strokeStyle = `rgba(202, 138, 4, ${0.5 + 0.5 * pulse})`;
+        ctx.lineWidth = 3 / camera.scale;
+        ctx.strokeRect(fc.x, fc.y, fc.w, fc.d);
+        ctx.restore();
+      }
     }
 
     if (shown("column")) {
@@ -344,7 +396,8 @@ export function mountPlan(canvas) {
       drawOpening(ctx, opening, color, text);
     });
     dimension(ctx, plate);
-    drawClearance(ctx);
+    // 기둥-칸 이격 치수(0.05m 등)는 확인용 — 화면에는 안 그림 (도면 sheet에서만 필요하면 그쪽에서)
+    if (globalThis.__showClearance) drawClearance(ctx);
     drawRoute(ctx);
   };
 
@@ -488,14 +541,14 @@ export function mountPlan(canvas) {
       return;
     }
 
-    const coreHit = document.body.dataset.wizard === "5" ? -1 : state.cores.findIndex((core) => hit(world, core));
+    const coreHit = (document.body.dataset.wizard === "5" || (document.body.dataset.wizard === "6" && !state.corePlaced && state.siteType !== "complex")) ? -1 : state.cores.findIndex((core) => hit(world, core));
     // 선택된 코어 안의 문·승강기·계단을 끌어 옮기기
     if (state.tool === "core" && document.body.dataset.wizard !== "5" && state.selection?.type === "core") {
       const ci = state.coreIndex;
       const core = state.cores[ci];
       const it = core && coreInteriorOf(core, state.aisles, state.plate?.blockRects);
       if (it && prevItemSel && prevItemSel.index === ci) {
-        const items0 = (it.elevators || []).concat(it.stair ? [it.stair] : []);
+        const items0 = (it.elevators || []).concat(stairsOf(it));
         const sel = items0.find((r) => r.label === prevItemSel.label);
         if (sel) {
           const h = rotHandleOf(sel);
@@ -513,7 +566,7 @@ export function mountPlan(canvas) {
           canvas.setPointerCapture(event.pointerId);
           return;
         }
-        const items = (it.elevators || []).concat(it.stair ? [it.stair] : []);
+        const items = (it.elevators || []).concat(stairsOf(it));
         const item = items.find((r) => near(r, 0));
         // 승강기·계단은 «한 번 눌러 고른 뒤» 끌어야 따로 움직임. 안 고른 상태로 끌면 코어 전체가 움직임(코어 잡기 쉽게)
         if (item && !(prevItemSel && prevItemSel.index === ci && prevItemSel.label === item.label)) {
@@ -603,7 +656,7 @@ export function mountPlan(canvas) {
         // 다른 승강기·계단과 겹치면 안 옮김
         const trial = { ...core, interiorEdit: { ...ed, items: { ...ed.items, [drag.label]: { ...(ed.items[drag.label] || {}), rx, ry } } } };
         const it = coreInteriorOf(trial, state.aisles, state.plate?.blockRects);
-        const all = (it?.elevators || []).concat(it?.stair ? [it.stair] : []);
+        const all = (it?.elevators || []).concat(stairsOf(it));
         const me = all.find((r) => r.label === drag.label);
         const clash = me && all.some((r) => r !== me && Math.min(me.x + me.w, r.x + r.w) - Math.max(me.x, r.x) > 0.02 && Math.min(me.y + me.d, r.y + r.d) - Math.max(me.y, r.y) > 0.02);
         if (clash) return;
@@ -806,6 +859,16 @@ export function mountPlan(canvas) {
   const host = canvas.parentElement;
   if (host) observer.observe(host);
   subscribe(draw);
+  // 코어 미리보기·깜빡임이 있을 때만 계속 다시 그림
+  let wasPulsing = false;
+  const pulseTick = () => {
+    const on = document.body.dataset.wizard === "6"
+      && (state.corePreview || (state.coreFlash && performance.now() < state.coreFlash.until));
+    if (on || wasPulsing) draw();
+    wasPulsing = Boolean(on);
+    requestAnimationFrame(pulseTick);
+  };
+  requestAnimationFrame(pulseTick);
   resize();
 }
 
@@ -1222,7 +1285,7 @@ function rotateCoreItem(ci, labelKey) {
   const core = state.cores[ci];
   if (!core) return;
   const it = coreInteriorOf(core, state.aisles, state.plate?.blockRects);
-  const items = (it?.elevators || []).concat(it?.stair ? [it.stair] : []);
+  const items = (it?.elevators || []).concat(stairsOf(it));
   const item = items.find((r) => r.label === labelKey);
   if (!item) return;
   const ed = { door: core.interiorEdit?.door ? { ...core.interiorEdit.door } : null, items: { ...(core.interiorEdit?.items || {}) } };
@@ -1230,7 +1293,7 @@ function rotateCoreItem(ci, labelKey) {
   const cx = item.x + item.w / 2; const cy = item.y + item.d / 2;
   ed.items[item.label] = { ...cur, rot: !cur.rot, rx: cx - item.d / 2 - core.x, ry: cy - item.w / 2 - core.y };
   const t = coreInteriorOf({ ...core, interiorEdit: ed }, state.aisles, state.plate?.blockRects);
-  const all = (t?.elevators || []).concat(t?.stair ? [t.stair] : []);
+  const all = (t?.elevators || []).concat(stairsOf(t));
   const me = all.find((r) => r.label === item.label);
   const clash = me && all.some((r) => r !== me && Math.min(me.x + me.w, r.x + r.w) - Math.max(me.x, r.x) > 0.02 && Math.min(me.y + me.d, r.y + r.d) - Math.max(me.y, r.y) > 0.02);
   if (clash) return;
@@ -1334,7 +1397,10 @@ function dimension(ctx, plate) {
 }
 
 function drawSite(ctx, plate) {
-  // 대지 이격: 외부 램프 여부와 무관하게 점선으로 표시 (공통·방향별)
+  // 대지 이격: 점선으로 표시 (공통·방향별). 내부 램프면 코어 단계부터는 필요 없어 숨김(외부 램프만 이격 안에 놓임)
+  const wz = typeof document !== "undefined" ? Number(document.body.dataset.wizard) : 0;
+  const external = (state.ramps || []).some((r) => r.placement === "external") || state.rampPlacement === "external";
+  if (wz >= 6 && !external) return;
   const m = siteMarginsOf({
     ...plate,
     siteMargin: plate.siteMargin != null ? plate.siteMargin : state.siteMargin,
@@ -1442,8 +1508,7 @@ function drawCoreInterior(ctx, interior, scale) {
     ctx.stroke();
     label(ctx, el.label || "EL", el.x + el.w / 2, el.y + el.d / 2, "#f8fafc");
   });
-  if (interior.stair) {
-    const st = interior.stair;
+  stairsOf(interior).forEach((st) => {
     ctx.fillStyle = "rgba(100, 116, 139, 0.25)";
     ctx.strokeStyle = "#475569";
     ctx.lineWidth = lw;
@@ -1463,8 +1528,8 @@ function drawCoreInterior(ctx, interior, scale) {
       }
       ctx.stroke();
     }
-    label(ctx, "계단", st.x + st.w / 2, st.y + st.d / 2, "#334155");
-  }
+    label(ctx, st.label && st.label !== "ST" ? `계단${st.label.slice(2)}` : "계단", st.x + st.w / 2, st.y + st.d / 2, "#334155");
+  });
   if (interior.door) {
     const d = interior.door;
     ctx.strokeStyle = "#0f766e";

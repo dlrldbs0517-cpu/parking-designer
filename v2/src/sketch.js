@@ -7,8 +7,8 @@
 // - 그린 뒤에는 꼭짓점을 끌어서 고칠 수 있음
 // 좌표: m, 동 +x, 북 +y. 대지가 있으면 대지 조회 지점 기준, 없으면 임의 원점.
 // 화면: 대지 주소를 조회했으면 지도 위에(api = context.mapDrawApi()), 아니면 격자 도면판에 그린다.
-import { localizer, outerRings } from "./zoning.js?v=365";
-import { outlineProblem as baseProblem, polygonArea } from "./outline.js?v=365";
+import { localizer, outerRings } from "./zoning.js?v=381";
+import { outlineProblem as baseProblem, polygonArea } from "./outline.js?v=381";
 // 외부 검사(예: 변 6m 이상)를 더할 수 있음 — openSketch({ validate })
 const outlineProblem = (pts) => baseProblem(pts) || (S.validate ? S.validate(pts) || "" : "");
 

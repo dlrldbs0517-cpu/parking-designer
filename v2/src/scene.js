@@ -4,10 +4,10 @@ import {
   CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, WALL_T,
   coreInterior, coreInteriorOf, pickCoreDoorSide, rampFootprint, rampShape, rampsForLevel,
   siteMarginsOf, stairCoreInterior,
-} from "./layout.js?v=365";
-import { analyzeOnPlate, rampMesh, slopePlan } from "./rampModules.js?v=365";
-import { isLegacyEquivalent, state, subscribe, summary } from "./state.js?v=365";
-import { chargerRect } from "./stallMarks.js?v=365";
+} from "./layout.js?v=381";
+import { analyzeOnPlate, rampMesh, slopePlan } from "./rampModules.js?v=381";
+import { isLegacyEquivalent, state, subscribe, summary } from "./state.js?v=381";
+import { chargerRect } from "./stallMarks.js?v=381";
 
 const DRAW_CAP = 12;
 let renderer;
@@ -511,8 +511,7 @@ function addCore(core, material, base) {
     wallBox(el.x + el.w / 2, base, el.y + el.d / 2, Math.max(0.6, el.w - 0.35), Math.max(0.5, el.d - 0.35), cabin, 2.15);
     addLabel(el.label || "EL", el.x + el.w / 2, base + h + 0.1, el.y + el.d / 2, 1.8);
   });
-  if (interior?.stair) {
-    const st = interior.stair;
+  (interior?.stairs || (interior?.stair ? [interior.stair] : [])).forEach((st) => {
     wallBox(st.x + st.w / 2, base, st.y + st.d / 2, st.w, st.d, stairMat, 0.18);
     const steps = 6;
     for (let i = 0; i < steps; i += 1) {
@@ -525,7 +524,7 @@ function addCore(core, material, base) {
       }
     }
     addLabel("계단", st.x + st.w / 2, base + h + 0.1, st.y + st.d / 2, 1.8);
-  }
+  });
   const labelText = core.kind === "stair" ? "피난계단" : "코어";
   addLabel(labelText, core.x + core.w / 2, base + h + 0.2, core.y + core.d / 2, 2.2);
 }

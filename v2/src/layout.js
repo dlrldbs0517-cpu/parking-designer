@@ -1,4 +1,4 @@
-import { assignStallTypes, tallyStallTypes, stallRuleTargets } from "./stallTypes.js?v=365";
+import { assignStallTypes, tallyStallTypes, stallRuleTargets } from "./stallTypes.js?v=381";
 import {
   externalBend9090Shape,
   externalCurve90Shape,
@@ -8,14 +8,14 @@ import {
   rampFormOf,
   rampsForLevel,
   spiralRampShape,
-} from "./rampForms.js?v=365";
-import { layoutComplex, layoutLoopFirst } from "./complexLayout.js?v=365";
+} from "./rampForms.js?v=381";
+import { layoutComplex, layoutLoopFirst } from "./complexLayout.js?v=381";
 import {
   analyzeOnPlate,
   slopePlan,
   usesModuleLayout,
   buildChain,
-} from "./rampModules.js?v=365";
+} from "./rampModules.js?v=381";
 import {
   polygonFromPlate,
   rectPolygon,
@@ -23,7 +23,7 @@ import {
   outsideBlockRects,
   isRectangularPlate,
   insetPolygon,
-} from "./polygon.js?v=365";
+} from "./polygon.js?v=381";
 
 export {
   lowerFloorRamp,
@@ -33,8 +33,8 @@ export {
   spiralRampShape,
   externalBend9090Shape,
   externalUTurn180Shape,
-} from "./rampForms.js?v=365";
-export { layoutComplex, layoutLoopFirst } from "./complexLayout.js?v=365";
+} from "./rampForms.js?v=381";
+export { layoutComplex, layoutLoopFirst } from "./complexLayout.js?v=381";
 
 /** 모듈 사슬 램프의 평면 분석(legacy 동등이면 null). */
 function moduleSiteOf(ramp, plate, blocks = []) {
@@ -463,13 +463,10 @@ export function snapCoreToCells(core, plate, keepOut = [], others = [], opts = {
   if (!core || !plate) return core;
   const { gx, gy } = coreGridLines(plate);
   // 한 방향 후보: ① 칸을 꽉 채움(칸 크기가 코어와 ±1.5m) ② 코어 크기 그대로 한쪽 변을 기둥 줄에 붙임
+  // 코어 크기는 사용자가 정한 그대로(2026-11-28) — 위치만 한쪽 변이 기둥 줄에 오게
   const spansOf = (lines, size0) => {
     const out = [];
     for (let i = 0; i < lines.length; i += 1) {
-      for (let k = 1; k <= 3 && i + k < lines.length; k += 1) {
-        const size = lines[i + k] - lines[i];
-        if (Math.abs(size - size0) <= 1.5) out.push({ pos: lines[i], size });
-      }
       out.push({ pos: lines[i], size: size0 });
       out.push({ pos: lines[i] - size0, size: size0 });
     }
@@ -1256,6 +1253,7 @@ export function clampCore(core, plate) {
   if (core.doorSide) out.doorSide = core.doorSide;
   if (core.interior) out.interior = core.interior;
   if (core.interiorEdit) out.interiorEdit = core.interiorEdit;
+  if (core.spec) out.spec = core.spec;   // 사용자가 정한 승강기·계단 크기
   return out;
 }
 
@@ -1274,6 +1272,36 @@ export function pickCoreDoorSide(core, aisles, blockRects) {
 }
 
 /**
+ * 코어 안 승강기·계단 크기(사용자가 정한 core.spec, 없으면 코어 크기로 자동).
+ * elevW: 승강기 폭(문 벽 방향), elevD: 깊이, stairW: 계단 폭, stairD: 계단 길이(깊이 방향)
+ */
+export function coreSpecOf(core, side = "s") {
+  const sp = (core && core.spec) || {};
+  const m = Math.min(core.w, core.d);
+  const along = (side === "n" || side === "s") ? core.w : core.d;
+  const elevW = sp.elevW > 0 ? sp.elevW : Math.min(2.1, Math.max(1.6, m * 0.28));
+  const elevD = sp.elevD > 0 ? sp.elevD : Math.min(2.4, Math.max(1.8, elevW + 0.2));
+  const stairW = sp.stairW > 0 ? sp.stairW : Math.min(2.6, Math.max(1.8, m * 0.32));
+  const stairD = sp.stairD > 0 ? sp.stairD : stairW * 1.6;
+  void along;
+  // 기본: 승강기 0대 · 계단 1개 (사용자가 코어를 눌러 정함)
+  const elevCount = Number.isFinite(sp.elevCount) ? Math.max(0, Math.min(4, Math.round(sp.elevCount))) : 0;
+  const stairCount = Number.isFinite(sp.stairCount) ? Math.max(0, Math.min(3, Math.round(sp.stairCount))) : 1;
+  return { elevCount, elevW, elevD, stairW, stairD, stairCount };
+}
+/** 정한 승강기·계단이 코어 안에 들어가는지 — 부족하면 필요한 길이 */
+export function coreSpecFit(core, side = "s") {
+  const sp = coreSpecOf(core, side);
+  const pad = WALL_T + 0.15;
+  const along = (side === "n" || side === "s") ? core.w : core.d;
+  const depth = (side === "n" || side === "s") ? core.d : core.w;
+  const lobbyDepth = Math.min(2.2, Math.max(1.4, depth * 0.28));
+  const needAlong = pad * 2 + sp.elevCount * sp.elevW + Math.max(0, sp.elevCount - 1) * 0.25 + 0.35 + sp.stairCount * sp.stairW + Math.max(0, sp.stairCount - 1) * 0.25;
+  const needDepth = pad * 2 + lobbyDepth + Math.max(sp.elevCount ? sp.elevD : 0, sp.stairCount ? sp.stairD : 0);
+  return { ok: needAlong <= along + 0.01 && needDepth <= depth + 0.01, needAlong, needDepth, along, depth };
+}
+
+/**
  * 코어 내부: 출입 전실 + 승강기(1~2대) + 피난계단.
  * doorClear는 문 밖 차로 쪽 금지 구역(주차칸이 문을 막지 않게).
  */
@@ -1282,9 +1310,11 @@ function coreInteriorBase(core, doorSide = "s") {
   const side = doorSide || "s";
   const wall = WALL_T;
   const doorW = Math.min(1.5, Math.max(1.0, Math.min(core.w, core.d) * 0.28));
-  const elevW = Math.min(2.1, Math.max(1.6, Math.min(core.w, core.d) * 0.28));
-  const elevD = Math.min(2.4, Math.max(1.8, elevW + 0.2));
-  const stairW = Math.min(2.6, Math.max(1.8, Math.min(core.w, core.d) * 0.32));
+  const sp = coreSpecOf(core, side);
+  const elevW = sp.elevW;
+  const elevD = sp.elevD;
+  const stairW = sp.stairW;
+  const stairL = sp.stairD;
   const pad = wall + 0.15;
   const r3 = (v) => Math.round(v * 1000) / 1000;
 
@@ -1292,7 +1322,8 @@ function coreInteriorBase(core, doorSide = "s") {
   const along = (side === "n" || side === "s") ? core.w : core.d;
   const depth = (side === "n" || side === "s") ? core.d : core.w;
   const lobbyDepth = Math.min(2.2, Math.max(1.4, depth * 0.28));
-  const elevCount = along >= elevW * 2 + stairW + 1.2 ? 2 : 1;
+  const elevCount = sp.elevCount;
+  const stairCount = sp.stairCount;
 
   const door = (() => {
     if (side === "s") return { x: core.x + (core.w - doorW) / 2, y: core.y, w: doorW, d: wall };
@@ -1373,7 +1404,7 @@ function coreInteriorBase(core, doorSide = "s") {
     const backY = side === "s"
       ? core.y + core.d - pad - elevD
       : core.y + pad;
-    const span = elevCount * elevW + (elevCount - 1) * 0.25 + stairW + 0.35;
+    const span = elevCount * elevW + Math.max(0, elevCount - 1) * 0.25 + stairCount * stairW + Math.max(0, stairCount - 1) * 0.25 + 0.35;
     let x0 = core.x + Math.max(pad, (core.w - span) / 2);
     for (let i = 0; i < elevCount; i += 1) {
       elevators.push({
@@ -1385,20 +1416,26 @@ function coreInteriorBase(core, doorSide = "s") {
       });
       x0 += elevW + 0.25;
     }
-    const stair = {
-      x: r3(x0 + 0.1),
-      y: r3(side === "s" ? core.y + core.d - pad - Math.min(stairW * 1.6, core.d - lobbyDepth - pad * 2) : core.y + pad),
-      w: r3(stairW),
-      d: r3(Math.min(stairW * 1.6, core.d - lobbyDepth - pad * 2)),
-      label: "ST",
-    };
-    return { doorSide: side, door, doorClear, lobby, elevators, stair };
+    const stairs = [];
+    let sx = x0 + 0.1;
+    for (let k = 0; k < stairCount; k += 1) {
+      const sd = Math.min(stairL, core.d - lobbyDepth - pad * 2);
+      stairs.push({
+        x: r3(sx),
+        y: r3(side === "s" ? core.y + core.d - pad - sd : core.y + pad),
+        w: r3(stairW),
+        d: r3(sd),
+        label: k ? `ST${k + 1}` : "ST",
+      });
+      sx += stairW + 0.25;
+    }
+    return { doorSide: side, door, doorClear, lobby, elevators, stair: stairs[0] || null, stairs };
   }
 
   const backX = side === "w"
     ? core.x + core.w - pad - elevD
     : core.x + pad;
-  const span = elevCount * elevW + (elevCount - 1) * 0.25 + stairW + 0.35;
+  const span = elevCount * elevW + Math.max(0, elevCount - 1) * 0.25 + stairCount * stairW + Math.max(0, stairCount - 1) * 0.25 + 0.35;
   let y0 = core.y + Math.max(pad, (core.d - span) / 2);
   for (let i = 0; i < elevCount; i += 1) {
     elevators.push({
@@ -1410,14 +1447,20 @@ function coreInteriorBase(core, doorSide = "s") {
     });
     y0 += elevW + 0.25;
   }
-  const stair = {
-    x: r3(side === "w" ? core.x + core.w - pad - Math.min(stairW * 1.6, core.w - lobbyDepth - pad * 2) : core.x + pad),
-    y: r3(y0 + 0.1),
-    w: r3(Math.min(stairW * 1.6, core.w - lobbyDepth - pad * 2)),
-    d: r3(stairW),
-    label: "ST",
-  };
-  return { doorSide: side, door, doorClear, lobby, elevators, stair };
+  const stairs = [];
+  let sy = y0 + 0.1;
+  for (let k = 0; k < stairCount; k += 1) {
+    const sw = Math.min(stairL, core.w - lobbyDepth - pad * 2);
+    stairs.push({
+      x: r3(side === "w" ? core.x + core.w - pad - sw : core.x + pad),
+      y: r3(sy),
+      w: r3(sw),
+      d: r3(stairW),
+      label: k ? `ST${k + 1}` : "ST",
+    });
+    sy += stairW + 0.25;
+  }
+  return { doorSide: side, door, doorClear, lobby, elevators, stair: stairs[0] || null, stairs };
 }
 
 /** 피난 전용 계단 코어 내부(계단만). */
@@ -1468,7 +1511,7 @@ export function coreInteriorOf(core, aisles, blockRects) {
 function applyInteriorEdit(core, it) {
   const ed = core && core.interiorEdit;
   if (!it || !ed) return it;
-  const out = { ...it, elevators: (it.elevators || []).map((e) => ({ ...e })), stair: it.stair ? { ...it.stair } : null };
+  const out = { ...it, elevators: (it.elevators || []).map((e) => ({ ...e })), stair: it.stair ? { ...it.stair } : null, stairs: (it.stairs || (it.stair ? [it.stair] : [])).map((e) => ({ ...e })) };
   const r3 = (v) => Math.round(v * 1000) / 1000;
   const cl = (v, a, b) => Math.max(a, Math.min(b, v));
   const W = WALL_T;
@@ -1502,7 +1545,8 @@ function applyInteriorEdit(core, it) {
     };
   };
   out.elevators = out.elevators.map(place);
-  if (out.stair) out.stair = place(out.stair);
+  out.stairs = out.stairs.map(place);
+  out.stair = out.stairs[0] || null;
   return out;
 }
 
@@ -2034,6 +2078,9 @@ export function generateVariants(input) {
   // 단지형에서는 기존 엔진을 가로·세로 최고안 두 개만 돌려 속도를 맞춘다.
   if (complexMode(input)) {
     specs = specs.filter((s, i) => i < 2);
+  } else if (input.fitPlanner !== false && !input.quick && !globalThis.__noFit) {
+    // 새 줄 배치(코어·램프 자리에 맞춰 줄 순서를 고름) — 가로·세로 두 안을 기존 안과 함께 비교
+    specs = specs.concat([{ ...specs[0], planner: "fit" }, { ...specs[1], planner: "fit" }, { ...specs[0], planner: "fitAll" }, { ...specs[1], planner: "fitAll" }]);
   }
   const variants = specs.map((spec, index) => {
     const result = layoutParking({ ...input, spec });
@@ -2416,7 +2463,7 @@ function layoutCore(input) {
   const plate = normalizePlate(input.plate || input);
   // legalStalls가 비어 있으면 배치 후 kept 개수로 다시 잡는다(아래 assign 직전).
   let typeRules = stallRuleTargets(plate.stallRules);
-  const spec = {
+  let spec = {
     axis: "x",
     dir: "ccw",   // 순환 방향은 고르지 않는다: 외부 램프는 반시계(우측통행), 내부 램프는 buildArrows에서 램프 방향을 따른다.
     packFrom: "start",
@@ -2503,6 +2550,13 @@ function layoutCore(input) {
     ? (keepClear.find((z) => z.role === "arrival") || keepClear[0] || null)
     : ((ramp.placement || "internal") === "internal" ? withArrivalZone(rampFootprint(ramp, plate), ramp, plate) : null);
   // 배치 틀(줄·차로)과 기둥 격자를 먼저 정하고, 격자 맞춤 코어를 실제 격자 칸에 맞춘다(코어가 기둥 격자 안에).
+  if (spec.planner === "fit" || spec.planner === "fitAll") {
+    // 새 줄 배치용 장애물: 코어·램프 조각(차로도 못 지나감) / 램프 진입·도착 등 비울 구역(칸만 못 놓음)
+    const hardObs = (input.cores || []).filter(Boolean).map((c) => ({ x: c.x, y: c.y, w: c.w, d: c.d, core: true, door: (c.interiorEdit && c.interiorEdit.door && c.interiorEdit.door.side) || c.doorSide || null }))
+      .concat(((ramp.placement || "internal") === "internal" ? (rampPiecesOf(ramp, plate) || []) : []).map((r) => ({ x: r.x, y: r.y, w: r.w, d: r.d })));
+    const softObs = keepClear.concat(rampBox ? [rampBox] : []).filter((r) => r && r.w > 0 && r.d > 0).map((r) => ({ x: r.x, y: r.y, w: r.w, d: r.d }));
+    spec = { ...spec, obstacles: { hard: hardObs, soft: softObs } };
+  }
   const geo = layoutGeometry(plate, spec, strip);
   const bands = geo.bands;
   // 기둥 줄: 가로·세로 간격 목록을 따로 넣으면 그것을, 없으면 기둥 간격 하나로 (추가 2026-11-10)
@@ -3014,6 +3068,12 @@ function layoutCore(input) {
     const extra = parallelStalls(aisles, blocks, plate, { d: STALL_D, l: STALL_W, type: "general", phase: "filler", center: false });
     extra.forEach((stall) => keptStalls.push(stall));
   }
+  // 조각 칸 정리(2026-11-28): 같은 줄에서 옆 칸과 이어지지 않는 1~2대짜리 직각 칸 조각은 뺀다(줄에서 떨어져 섬처럼 놓인 칸)
+  if (plate.pruneFragments !== false && !globalThis.__noPrune) {
+    const pruned = pruneStallFragments(keptStalls, 3, 0.8, plate, cores.concat(rampPiecesOf(ramp, plate) || []));
+    keptStalls.length = 0;
+    keptStalls.push(...pruned);
+  }
   typeRules = stallRuleTargets({
     ...(plate.stallRules || {}),
     placedStalls: keptStalls.length,
@@ -3274,6 +3334,8 @@ function rejectReason(flags) {
 
 function variantName(spec, input) {
   const axis = spec.axis === "x" ? "가로 베이" : "세로 베이";
+  if (spec.planner === "fit") return `${axis} · 코어·램프 맞춤 줄 배치 · ${spec.rampPlacement === "external" ? "외부 램프" : "내부 램프"}`;
+  if (spec.planner === "fitAll") return `${axis} · 새 엔진(벽부터 줄 배치) · ${spec.rampPlacement === "external" ? "외부 램프" : "내부 램프"}`;
   const pack = spec.packFrom === "end" ? "루프 반대 정렬" : "루프 기준";
   const bay = spec.bayMode === "minus1" ? "내부 베이 -1" : "내부 최대";
   const placement = spec.rampPlacement === "external" ? "외부 램프" : "내부 램프";
@@ -3449,6 +3511,10 @@ function wallStrip(ramp, plate) {
 }
 
 function layoutGeometry(plate, spec, strip) {
+  if (!strip && spec.planner === "fitAll" && spec.obstacles) {
+    const g = fitAllGeometry(plate, spec);
+    if (g) return g;
+  }
   if (!strip) {
     return {
       aisles: loopAisles(plate).concat(innerAisles(plate, spec)),
@@ -3474,9 +3540,59 @@ function layoutGeometry(plate, spec, strip) {
     return cross ? toWall(r) : r;
   });
   const perim = perimeterBands(sub).map(mv).map((b) => (horiz && b.along === "x" ? toWall(b) : b));
+  const unmv = (r) => ({ ...r, x: r.x - dx, y: r.y - dy });
+  const subSpec = spec.obstacles ? { ...spec, obstacles: { hard: spec.obstacles.hard.map(unmv), soft: spec.obstacles.soft.map(unmv) } } : spec;   // core·door 표시는 ...r로 그대로
   return {
-    aisles: rings.concat(innerAisles(sub, spec).map(mv)),
-    bands: perim.concat(innerStallBands(sub, spec).map(mv)),
+    aisles: rings.concat(innerAisles(sub, subSpec).map(mv)),
+    bands: perim.concat(innerStallBands(sub, subSpec).map(mv)),
+  };
+}
+
+/**
+ * 새 줄 배치(전체, 2026-11-28): 벽에서 벽까지 칸 줄·차로 순서를 새 엔진이 정한다(위아래 순환 차로도 고정 안 함).
+ * 줄과 나란한 차로들은 양쪽 끝 세로 차로 2개로 이어 한 바퀴 동선을 만든다. axis y는 가로·세로를 바꿔 계산.
+ */
+function fitAllGeometry(plate, spec) {
+  const T = spec.axis === "y";
+  const sw = (r) => (r ? { ...r, x: r.y, y: r.x, w: r.d, d: r.w } : r);
+  const P = T ? { ...plate, width: plate.depth, depth: plate.width } : plate;
+  const doorT = { s: "w", n: "e", w: "s", e: "n" };   // 가로·세로를 바꾸면 문 방향도 바뀜
+  const swH = (r) => (T ? { ...sw(r), ...(r.door ? { door: doorT[r.door] } : {}) } : r);
+  const obs = spec.obstacles ? { hard: spec.obstacles.hard.map(swH), soft: spec.obstacles.soft.map((r) => (T ? sw(r) : r)) } : { hard: [], soft: [] };
+  const res = fitPieces(P, { ...spec, axis: "x", obstacles: obs }, { full: true });
+  const seq = (res && res.seq) || [];
+  const aisleEv = seq.filter((e) => e.kind === "aisle");
+  if (!aisleEv.length) return null;
+  const W = P.width; const D = P.depth;
+  const yMin = aisleEv[0].p; const yMax = aisleEv[aisleEv.length - 1].q;
+  const a0 = STALL_D + AISLE; const a1 = W - STALL_D - AISLE;
+  const aisles = []; const bands = [];
+  aisleEv.forEach((e, k) => {
+    const outer = k === 0 || k === aisleEv.length - 1;
+    if (outer) aisles.push({ x: 0, y: e.p, w: W, d: e.q - e.p, role: "ring", phase: "loop", side: k === 0 ? "s" : "n" });
+    else aisles.push({ x: STALL_D, y: e.p, w: W - STALL_D * 2, d: e.q - e.p, role: "interior", phase: "inner" });
+  });
+  if (yMax - yMin > AISLE + 0.01) {
+    aisles.push({ x: STALL_D, y: yMin, w: AISLE, d: yMax - yMin, role: "ring", phase: "loop", side: "w" });
+    aisles.push({ x: W - STALL_D - AISLE, y: yMin, w: AISLE, d: yMax - yMin, role: "ring", phase: "loop", side: "e" });
+    const sy0 = yMin + AISLE; const sy1 = yMax - AISLE;
+    if (sy1 - sy0 >= STALL_W) {
+      bands.push({ x: 0, y: sy0, w: STALL_D, d: sy1 - sy0, along: "y", face: "e", phase: "perimeter" });
+      bands.push({ x: W - STALL_D, y: sy0, w: STALL_D, d: sy1 - sy0, along: "y", face: "w", phase: "perimeter" });
+    }
+  }
+  seq.filter((e) => e.kind === "row").forEach((e) => {
+    const outside = e.q <= yMin + 0.01 || e.p >= yMax - 0.01;
+    const face = e.face === "lo" ? "s" : "n";
+    bands.push(outside
+      ? { x: 0, y: e.p, w: W, d: e.q - e.p, along: "x", face, phase: "perimeter" }
+      : { x: a0, y: e.p, w: a1 - a0, d: e.q - e.p, along: "x", face, phase: "inner" });
+  });
+  if (!T) return { aisles, bands };
+  const sideMap = { s: "w", n: "e", w: "s", e: "n" };
+  return {
+    aisles: aisles.map((a) => ({ ...sw(a), ...(a.side ? { side: sideMap[a.side] } : {}) })),
+    bands: bands.map((b) => ({ ...sw(b), along: b.along === "x" ? "y" : "x", face: sideMap[b.face] })),
   };
 }
 
@@ -3543,7 +3659,115 @@ function innerStallBands(plate, spec) {
   return innerPieces(plate, spec).bands;
 }
 
+/**
+ * 새 줄 배치(2026-11-28): 안쪽 구역을 «칸 줄(5.2) · 차로(6) · 빈 띠»의 모든 순서로 0.1m 단위로 따져서
+ * 코어·램프 자리를 피해 대수가 가장 많은 순서를 고른다(동적계획법).
+ * - 칸 줄은 바로 옆(앞이나 뒤)에 차로가 있어야 함. 순환 차로(안쪽 구역 양 끝)도 차로로 침.
+ * - 차로는 코어·램프 조각을 지나가면 안 됨(막힘). 칸 줄은 장애물과 겹치는 x 구간만큼 빠짐.
+ * spec.obstacles = { hard: [코어·램프 조각], soft: [램프 진입·도착 구역 등 — 칸만 못 놓음] } (이 평면 좌표)
+ */
+function fitPieces(plate, spec, opt = {}) {
+  const origin = STALL_D + AISLE;
+  const horiz = spec.axis === "x";        // 줄이 가로로 길게(→ 세로 방향으로 쌓음)
+  const lo = opt.full ? 0 : origin; const hi = (horiz ? plate.depth : plate.width) - (opt.full ? 0 : origin);
+  const a0 = origin; const a1 = (horiz ? plate.width : plate.depth) - origin;   // 줄 길이 방향 범위
+  if (hi - lo < STALL_D || a1 - a0 < STALL_W) return { bands: [], aisles: [] };
+  const hard = (spec.obstacles && spec.obstacles.hard) || [];
+  const soft = (spec.obstacles && spec.obstacles.soft) || [];
+  // 장애물을 (쌓는 방향 구간 [p0,p1], 줄 방향 구간 [q0,q1])로
+  const iv = (r) => (horiz ? { p0: r.y, p1: r.y + r.d, q0: r.x, q1: r.x + r.w } : { p0: r.x, p1: r.x + r.w, q0: r.y, q1: r.y + r.d });
+  const H = hard.map(iv); const S = soft.map(iv);
+  // 코어 문 쪽 변에 차로가 바로 붙으면 가산점(안 붙으면 엔진이 코어 둘레로 진입 차로를 따로 내서 땅을 많이 먹음)
+  const lowSide = horiz ? "s" : "w"; const highSide = horiz ? "n" : "e";
+  const doors = hard.filter((r) => r.core).map((r) => ({ ...iv(r), door: r.door || null }));
+  const DOOR_BONUS = 8;
+  const doorBonus = (p, q) => doors.reduce((b, c) => {
+    if (c.q1 <= a0 || c.q0 >= a1) return b;
+    const lowOk = (!c.door || c.door === lowSide) && Math.abs(q - c.p0) < 0.35;    // 차로가 코어 아래(앞)쪽 변에 붙음
+    const highOk = (!c.door || c.door === highSide) && Math.abs(p - c.p1) < 0.35;  // 차로가 코어 위쪽 변에 붙음
+    return b + (lowOk || highOk ? DOOR_BONUS : 0);
+  }, 0);
+  const STEP = 0.1;
+  const N = Math.floor((hi - lo) / STEP + 1e-6);
+  const at = (i) => lo + i * STEP;
+  const rowLen = Math.round(STALL_D / STEP); const aisleLen = Math.round(AISLE / STEP);
+  // 칸 줄 [p, p+STALL_D]에 들어가는 대수: 줄 방향 [a0,a1]에서 걸리는 장애물 구간을 빼고 2.5m씩
+  const rowCache = new Map();
+  const rowValue = (i) => {
+    if (rowCache.has(i)) return rowCache.get(i);
+    const p = at(i); const q = p + STALL_D;
+    // 전체 모드: 벽에 붙은 줄은 순환 차로 바깥이라 벽 끝까지(모서리 포함) 칸이 들어감
+    const wallRow = opt.full && (i === 0 || i + rowLen === N);
+    const b0 = wallRow ? 0 : a0; const b1 = wallRow ? (horiz ? plate.width : plate.depth) : a1;
+    const cuts = H.concat(S).filter((o) => o.p0 < q - 0.05 && o.p1 > p + 0.05).map((o) => [Math.max(b0, o.q0 - 0.05), Math.min(b1, o.q1 + 0.05)]).filter((c) => c[1] > c[0]).sort((x, y) => x[0] - y[0]);
+    let cur = b0; let n = 0;
+    cuts.forEach(([c0, c1]) => { if (c0 > cur) n += Math.floor((c0 - cur) / STALL_W + 1e-6); cur = Math.max(cur, c1); });
+    if (b1 > cur) n += Math.floor((b1 - cur) / STALL_W + 1e-6);
+    rowCache.set(i, n);
+    return n;
+  };
+  // 차로는 코어·램프에서 0.6m 넘게 떨어져야(코어가 뒤에 격자로 조금 움직여도 차로를 물지 않게 — 물면 코어 둘레로 우회 차로가 생김)
+  const aisleOk = (i) => {
+    const p = at(i); const q = p + AISLE;
+    return !H.some((o) => o.p0 < q - 0.05 && o.p1 > p + 0.05 && o.q0 < a1 && o.q1 > a0);
+  };
+  // 상태: 0 = 바로 앞이 차로(시작=순환 차로), 1 = 앞이 «차로에 붙은» 칸 줄, 2 = 앞이 «아직 차로 없는» 칸 줄(다음은 꼭 차로), 3 = 빈 띠
+  const NEG = -1e9;
+  const best = Array.from({ length: N + 1 }, () => [NEG, NEG, NEG, NEG]);
+  const from = Array.from({ length: N + 1 }, () => [null, null, null, null]);
+  best[0][opt.full ? 3 : 0] = 0;   // full: 벽에서 시작(첫 줄은 다음 차로가 받아야 함)
+  const relax = (j, st, val, prev) => { if (j <= N && val > best[j][st] + 1e-9) { best[j][st] = val; from[j][st] = prev; } };
+  for (let i = 0; i <= N; i += 1) {
+    for (let st = 0; st < 4; st += 1) {
+      const v = best[i][st];
+      if (v <= NEG / 2) continue;
+      // 빈 띠 0.1m (단, «차로 기다리는 칸 줄» 뒤에는 못 둠)
+      if (st !== 2) relax(i + 1, 3, v - 0.001, { i, st, kind: "gap" });
+      // 차로
+      if (st !== 0 && i + aisleLen <= N && aisleOk(i)) relax(i + aisleLen, 0, v - 0.01 + doorBonus(at(i), at(i + aisleLen)), { i, st, kind: "aisle" });
+      // 칸 줄
+      if (i + rowLen <= N) {
+        const rv = rowValue(i);
+        if (st === 0) relax(i + rowLen, 1, v + rv, { i, st, kind: "row", face: "lo" });         // 앞(아래) 차로를 봄
+        else if (st === 1 || st === 3) relax(i + rowLen, 2, v + rv, { i, st, kind: "row", face: "hi" });   // 뒤(위) 차로를 봐야 함
+      }
+    }
+  }
+  // 끝은 반대편 순환 차로 → 어떤 상태로 끝나도 됨(2도 위 순환 차로가 받아 줌)
+  let endSt = opt.full ? 3 : 0;
+  for (let st = 0; st < 4; st += 1) {
+    if (opt.full && st === 2) continue;   // 벽에서 끝: «차로 기다리는 칸 줄»로 끝나면 안 됨
+    if (best[N][st] > best[N][endSt]) endSt = st;
+  }
+  const seq = [];
+  let i = N; let st = endSt;
+  while (i > 0 && from[i][st]) {
+    const f = from[i][st];
+    seq.push({ ...f, end: i });
+    i = f.i; st = f.st;
+  }
+  seq.reverse();
+  if (globalThis.__fitLog) globalThis.__fitLog.push({ lo, hi, a0, a1, H, S, seq: seq.filter((e) => e.kind !== "gap").map((e) => `${e.kind}${e.face || ""}@${round3(at(e.i))}-${round3(at(e.end))}`), val: best[N][endSt] });
+  if (opt.full) return { seq: seq.filter((e) => e.kind !== "gap").map((e) => ({ kind: e.kind, face: e.face, p: round3(at(e.i)), q: round3(at(e.end)) })) };
+  const bands = []; const aisles = [];
+  seq.forEach((e) => {
+    const p = at(e.i); const q = at(e.end);
+    if (e.kind === "row") {
+      const face = e.face === "lo" ? (horiz ? "s" : "w") : (horiz ? "n" : "e");
+      bands.push(horiz
+        ? { x: a0, y: round3(p), w: round3(a1 - a0), d: round3(q - p), along: "x", face, phase: "inner" }
+        : { x: round3(p), y: a0, w: round3(q - p), d: round3(a1 - a0), along: "y", face, phase: "inner" });
+    } else if (e.kind === "aisle") {
+      aisles.push(horiz
+        ? { x: STALL_D, y: round3(p), w: round3(plate.width - STALL_D * 2), d: round3(q - p), role: "interior", phase: "inner" }
+        : { x: round3(p), y: STALL_D, w: round3(q - p), d: round3(plate.depth - STALL_D * 2), role: "interior", phase: "inner" });
+    }
+  });
+  return { bands, aisles };
+}
+
 function innerPieces(plate, spec) {
+  if ((spec.planner === "fit" || spec.planner === "fitAll") && spec.obstacles) return fitPieces(plate, spec);
   const origin = STALL_D + AISLE;
   const x0 = origin;
   const y0 = origin;
@@ -4035,6 +4259,63 @@ function frontSegments(bands, plate) {
     const x = frontEast ? band.x + band.w : band.x;
     return { axis: "v", x, y0: band.y, y1: band.y + band.d, outward: frontEast ? -1 : 1, front: true };
   });
+}
+
+/**
+ * 직각 주차칸을 줄(같은 차로 방향·같은 앞선)로 묶어, 옆 칸과 tol(기둥 한 개) 안으로 이어진 묶음이 minRun대 미만이고
+ * 뒤가 외벽·코어·램프·제대로 된 줄(minRun대 이상)에 붙어 있지 않으면 — 섬처럼 떠 있는 조각 — 뺀다.
+ * 평행 칸(phase parallel)은 그대로 둔다.
+ */
+export function pruneStallFragments(stalls, minRun = 3, tol = 0.8, plate = null, blocks = []) {
+  const list = stalls || [];
+  const groups = new Map();
+  list.forEach((st, i) => {
+    if (st.phase === "parallel" || !st.aisle) return;
+    const ns = st.aisle === "n" || st.aisle === "s";
+    const key = `${st.aisle}|${ns ? Math.round(st.y * 10) : Math.round(st.x * 10)}|${ns ? Math.round(st.d * 10) : Math.round(st.w * 10)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ i, a: ns ? st.x : st.y, b: ns ? st.x + st.w : st.y + st.d });
+  });
+  const runs = [];
+  groups.forEach((arr) => {
+    arr.sort((p, q) => p.a - q.a);
+    let run = [arr[0]];
+    for (let k = 1; k < arr.length; k += 1) {
+      if (arr[k].a - run[run.length - 1].b <= tol) run.push(arr[k]);
+      else { runs.push(run); run = [arr[k]]; }
+    }
+    runs.push(run);
+  });
+  const keepIdx = new Set();
+  runs.forEach((r) => { if (r.length >= minRun) r.forEach((x) => keepIdx.add(x.i)); });
+  const hit = (p, q) => p.x < q.x + q.w && p.x + p.w > q.x && p.y < q.y + q.d && p.y + p.d > q.y;
+  const backStrip = (r) => {
+    const st = list[r[0].i];
+    const a = r[0].a; const b = r[r.length - 1].b; const g = 0.8;
+    if (st.aisle === "n") return { x: a, y: st.y - g, w: b - a, d: g };          // 차로가 북쪽 → 뒤는 남쪽
+    if (st.aisle === "s") return { x: a, y: st.y + st.d, w: b - a, d: g };
+    if (st.aisle === "e") return { x: st.x - g, y: a, w: g, d: b - a };
+    return { x: st.x + st.w, y: a, w: g, d: b - a };
+  };
+  // 짧은 묶음: 뒤가 외벽·코어·램프, 또는 이미 남긴 칸(긴 줄이나 벽에 붙은 짧은 묶음)에 붙으면 남김 — 몇 번 되풀이
+  const short = runs.filter((r) => r.length < minRun);
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false;
+    const kept = list.filter((_, i) => keepIdx.has(i));
+    short.forEach((r) => {
+      if (keepIdx.has(r[0].i)) return;
+      const strip = backStrip(r);
+      const wall = plate && (strip.x < 0.05 || strip.y < 0.05 || strip.x + strip.w > plate.width - 0.05 || strip.y + strip.d > plate.depth - 0.05);
+      if (wall || (blocks || []).some((bk) => bk && hit(strip, bk)) || kept.some((ks) => hit(strip, ks))) {
+        r.forEach((x) => keepIdx.add(x.i));
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  const drop = new Set();
+  short.forEach((r) => { if (!keepIdx.has(r[0].i)) r.forEach((x) => drop.add(x.i)); });
+  return drop.size ? list.filter((_, i) => !drop.has(i)) : list.slice();
 }
 
 function placeColumns(segments, gridX, gridY, plate, obstacles) {

@@ -22,7 +22,7 @@ import {
   vworldDomain,
   vworldKey,
   zoneWmsLayers,
-} from "./zoning.js?v=365";
+} from "./zoning.js?v=381";
 
 const $ = (id) => document.getElementById(id);
 const MAX_SIDE = 1000;   // 영역 한 변 최대(m). 브이월드가 레이어당 1,000개까지만 준다.

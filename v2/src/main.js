@@ -1,23 +1,23 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay, edgeGap } from "./layout.js?v=365";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=365";
-import { drawThumb, invalidatePlanFit, mountPlan } from "./plan.js?v=365";
-import { stallRuleTargets } from "./stallTypes.js?v=365";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay, edgeGap, coreGridLines, rampKeepOut, coreSpecOf, coreSpecFit, pickCoreDoorSide } from "./layout.js?v=381";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=381";
+import { drawThumb, invalidatePlanFit, mountPlan } from "./plan.js?v=381";
+import { stallRuleTargets } from "./stallTypes.js?v=381";
 import {
   plateDimsFromPolygon, presetChamferRect, presetL, presetTrapezoid, presetU,
   rectPolygon, validatePolygon, normalizePolygon, offsetPolygon, polygonArea, edgeLengths,
-} from "./polygon.js?v=365";
-import { eumLandUrl, localizer, lookupZoning, lookupZoningAt, outerRings, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=365";
-import { openSketch, closeSketch, sketchOpen } from "./sketch.js?v=365";
-import { addBuilding, addCore, addStairCore, applyVariant, autoPlaceCore, buildingOfCore, clearParkPolygon, coreLabel, currentStallRules, demandResult, editRampModules, emit, generatePlate, loadReference, optimizeLayout, parseSpans, placeOverlapExample, placeSplitExample, pinLowerRampOverrides, preparePlateShell, readyFor3d, issueGroups, rampFallback, rampModuleInfo, recommendLayouts, removeBuilding, removeSelection, rotateSelectedRamp, totalStallShortages, gridCombos, adoptGridResults, axisGridCandidates, applyGridChoice, setGridOptions, gridKeyNow, snapAllCores, centeredGrid, selectCore, selectItem, selectedOpening, selectedRamp, setParkPolygon, setReveal, setSiteType, setStep, setTool, state, subscribe, summary, syncPlateMeta, updateBuilding, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState, rebuildLayout } from "./state.js?v=365";
+} from "./polygon.js?v=381";
+import { eumLandUrl, localizer, lookupZoning, lookupZoningAt, outerRings, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=381";
+import { openSketch, closeSketch, sketchOpen } from "./sketch.js?v=381";
+import { addBuilding, addCore, addStairCore, applyVariant, autoPlaceCore, buildingOfCore, clearParkPolygon, coreLabel, currentStallRules, demandResult, editRampModules, emit, generatePlate, loadReference, optimizeLayout, parseSpans, placeOverlapExample, placeSplitExample, pinLowerRampOverrides, preparePlateShell, readyFor3d, issueGroups, rampFallback, rampModuleInfo, recommendLayouts, removeBuilding, removeSelection, rotateSelectedRamp, totalStallShortages, gridCombos, adoptGridResults, axisGridCandidates, applyGridChoice, setGridOptions, gridKeyNow, snapAllCores, centeredGrid, setCoreSize, placeCoreNow, addCoreSized, setCoreSpec, deleteCoreAt, setCoreDoor, previewCoreSized, selectCore, selectItem, selectedOpening, selectedRamp, setParkPolygon, setReveal, setSiteType, setStep, setTool, state, subscribe, summary, syncPlateMeta, updateBuilding, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState, rebuildLayout } from "./state.js?v=381";
 let lastFitSlide = 0;   // 평면 카메라 맞춤을 마지막으로 한 단계
 
 // 시트·DXF·주변지도는 클릭 시에만 불러 초기 로딩을 줄인다.
 let sheetMod = null;
 let dxfMod = null;
 let contextMod = null;
-const loadSheet = () => (sheetMod ||= import("./sheet.js?v=365"));
-const loadDxf = () => (dxfMod ||= import("./dxfExport.js?v=365"));
-const loadContext = () => (contextMod ||= import("./context.js?v=365"));
+const loadSheet = () => (sheetMod ||= import("./sheet.js?v=381"));
+const loadDxf = () => (dxfMod ||= import("./dxfExport.js?v=381"));
+const loadContext = () => (contextMod ||= import("./context.js?v=381"));
 async function closeContext() {
   const m = await loadContext();
   return m.closeContext();
@@ -31,7 +31,7 @@ const WIZARD_MAX = 8;
 const WIZARD_LABELS = {
   1: "주소를 입력한 뒤 다음으로 진행하세요.",
   2: "용도와 건물 형태를 고른 뒤 다음으로 진행하세요.",
-  3: "주차장 크기·기둥 간격·층고를 정하세요.",
+  3: "주차장 크기·층고를 정하세요.",
   4: "도로가 접한 변과 대지 이격을 고르세요.",
   5: "램프를 배치하고 왼쪽 평면에서 위치를 조정하세요.",
   6: "코어를 배치하고 왼쪽 평면에서 위치를 조정하세요.",
@@ -309,6 +309,7 @@ $("grid-manual")?.addEventListener("click", () => {
   // 지금 쓰는 격자를 입력칸에 채워 두고 연다
   if ($("spans-x")) $("spans-x").value = state.spansX || "";
   if ($("spans-y")) $("spans-y").value = state.spansY || "";
+  $("column-dialog").classList.remove("no-spans");
   $("column-dialog").showModal();
 });
 /** 코어 단계에서 직접 입력한 간격을 평면 격자에 반영하고 코어를 새 격자 칸에 맞춤 */
@@ -419,7 +420,7 @@ let workerSeq = 0;
 function runInWorker(op, args = []) {
   return new Promise((resolve, reject) => {
     try {
-      if (!worker) worker = new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" });
+      if (!worker) worker = new Worker(new URL("./worker.js?v=381", import.meta.url), { type: "module" });
     } catch (error) { reject(error); return; }
     const id = ++workerSeq;
     let snap;
@@ -460,7 +461,7 @@ async function searchGridsParallel() {
   snap0.variants = []; snap0.stalls = [];
   const n = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1));
   stopGridPool();
-  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" }));
+  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=381", import.meta.url), { type: "module" }));
   const runBatch = async (combos) => {
     const chunks = Array.from({ length: n }, () => []);
     combos.forEach((c, i) => chunks[i % n].push(c));
@@ -526,7 +527,7 @@ async function recommendParallel() {
   const n = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1));
   const snap = structuredClone(state);
   stopGridPool();
-  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" }));
+  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=381", import.meta.url), { type: "module" }));
   const runBatch = async (combos) => {
     const chunks = Array.from({ length: n }, () => []);
     combos.forEach((c, i) => chunks[i % n].push(c));
@@ -720,7 +721,7 @@ function setWizard(next, { silent = false } = {}) {
       wizardAnimating = false;
       document.body.dataset.wizard = String(next);
       render();
-      if (next === 3) showSiteMapForSize();
+      if (next === 3 && !sketchOpen()) { const p = openCadSketch(); syncMapDrawBox(); if (p && p.then) p.then(() => syncMapDrawBox()); }   // 크기 단계: 들어오면 바로 외곽 그리기
       if (next >= 4 && !$("context-view").hidden) closeContext();   // 3단계 지도가 램프 단계 평면을 가리지 않게
       if (next >= 5) {
         requestAnimationFrame(() => { const fit = $("fit"); if (fit) fit.click(); });
@@ -730,6 +731,12 @@ function setWizard(next, { silent = false } = {}) {
 
   // 7단계: 램프·코어 설정이 끝난 뒤 주차장을 생성하고 추천 3안 탐색
   if (next === 7) {
+    if (state.siteType !== "complex" && !state.corePlaced) {
+      const n = $("core-place-note");
+      if (n) { n.textContent = "먼저 코어 크기를 고르고 「코어 추가」를 눌러 주세요."; n.classList.add("error"); }
+      $("core-add2")?.focus();
+      return;
+    }
     if (!inputsValid()) {
       setWizard(3, { silent: true });
       return;
@@ -915,7 +922,8 @@ async function openCadSketch() {
   });
 }
 $("plate-cad-draw")?.addEventListener("click", () => { openCadSketch(); });
-$("plate-map-draw")?.addEventListener("click", () => { openCadSketch(); });
+$("plate-map-draw")?.addEventListener("click", () => { openCadSketch().then(() => syncMapDrawBox()); syncMapDrawBox(); });
+["sketch-cancel", "sketch-apply"].forEach((id) => $(id)?.addEventListener("click", () => setTimeout(() => syncMapDrawBox(), 60)));
 $("ramp-map-peek")?.addEventListener("click", async () => {
   const c = state.demand.sitePoint;
   if (!c) return;
@@ -938,9 +946,10 @@ function syncMapDrawBox() {
   const poly = state.parkPolygon;
   const plain = (q) => q && q.length === 4 && q.every((a, i) => { const b = q[(i + 1) % 4]; return Math.abs(a.x - b.x) < 1e-6 || Math.abs(a.y - b.y) < 1e-6; });
   const drawn = (state.parkPolygonGeo && poly && state.parkPolygonGeo.key === polyKey(poly)) || (poly?.length >= 3 && !plain(poly));
-  btn.textContent = `${onMap ? "대지 위에 " : ""}외곽 ${drawn ? "고치기" : "그리기"}`;
+  btn.textContent = `${onMap ? "대지 위에 " : ""}외곽 다시 ${drawn ? "고치기" : "그리기"}`;
+  btn.hidden = sketchOpen();   // 그리기 창이 열려 있으면 버튼 숨김(크기 단계에 들어오면 바로 열림)
   const stats = $("plate-draw-stats");
-  if (stats && !(poly?.length >= 3)) stats.textContent = `지금은 ${state.parkWidth} × ${state.parkDepth}m 직사각형입니다. 모양이 다르면 외곽을 그리세요.`;
+  if (stats && !(poly?.length >= 3)) stats.textContent = `지금은 ${state.parkWidth} × ${state.parkDepth}m 직사각형입니다. 모양이 다르면 왼쪽에 바로 외곽을 그리세요.`;
 }
 
 $("plate-clear-poly")?.addEventListener("click", () => {
@@ -1005,6 +1014,227 @@ fields.coreArea.addEventListener("change", () => updateCoreArea(Number(fields.co
 $("core-nx").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
 $("core-ny").addEventListener("change", () => updateCore({ nx: Number($("core-nx").value), ny: Number($("core-ny").value) }));
 $("open-core-dialog").addEventListener("click", () => $("core-dialog").showModal());
+// ── 코어 단계: 크기 고르기 → 코어 추가 → 코어 눌러 안쪽(승강기·계단) 크기 ──
+$("prune-fragments")?.addEventListener("change", () => {
+  state.pruneFragments = $("prune-fragments").checked;
+  if (wizardSlide >= 7 && state.plate) busy("추천 주차 배치 3안을 다시 고르는 중…", recommendLayouts, "recommend", () => render());
+});
+$("core-add2")?.addEventListener("click", () => {
+  const W = Number($("core-w2").value); const D = Number($("core-d2").value);
+  if (!(W >= 3 && W <= 30 && D >= 3 && D <= 30)) {
+    $("core-place-note").textContent = "가로·세로를 3~30m로 넣어 주세요.";
+    return;
+  }
+  corePreviewOn = false;
+  state.corePreview = null;
+  const spec = newCoreSpec();
+  let found = null;
+  busy("코어 놓을 자리 찾는 중…", () => {}, async () => { found = await searchCoreSpot(W, D); }, () => {
+    addCoreSized(W, D, spec, found);
+    requestAnimationFrame(() => { const fit = $("fit"); if (fit) fit.click(); });
+  });
+});
+/** 새 코어 자리 후보: 벽에 붙인 자리 + 기둥 줄에 변을 맞춘 자리 (램프 구역·다른 코어와 안 겹침) */
+function coreSpotCandidates(W, D) {
+  const P = state.plate;
+  let g;
+  try { g = coreGridLines(P); } catch (e) { return []; }
+  const others = state.corePlaced ? state.cores : [];
+  const keep = rampKeepOut(state.ramps, P);
+  const dedupe = (arr, max) => {
+    const v = [...new Set(arr.map((a) => Math.round(a * 100) / 100))].filter((a) => a >= -0.01 && a <= max + 0.01).sort((p, q) => p - q);
+    const out = [];
+    v.forEach((a) => { if (!out.length || a - out[out.length - 1] > 0.6) out.push(a); });
+    return out;
+  };
+  const xs = dedupe([0, P.width - W, ...g.gx, ...g.gx.map((x) => x - W)], P.width - W);
+  const ys = dedupe([0, P.depth - D, ...g.gy, ...g.gy.map((y) => y - D)], P.depth - D);
+  const ov = (a, b, m = 0) => a.x < b.x + b.w + m && a.x + a.w + m > b.x && a.y < b.y + b.d + m && a.y + a.d + m > b.y;
+  const seen = new Set();
+  const wall = []; const inner = [];
+  xs.forEach((x, i) => ys.forEach((y, j) => {
+    const c = { x, y, w: W, d: D };
+    if (keep.some((k) => ov(c, k)) || others.some((o) => ov(c, o, 0.5))) return;
+    const k = `${x}|${y}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    const onWall = x < 0.05 || y < 0.05 || x > P.width - W - 0.05 || y > P.depth - D - 0.05;
+    if (onWall) wall.push(c);
+    else if ((i + j) % 2 === 0) inner.push(c);   // 안쪽은 하나 걸러 하나만(계산량)
+  }));
+  const pick = (arr, n) => (arr.length <= n ? arr : arr.filter((_, i) => i % Math.ceil(arr.length / n) === 0));
+  return pick(wall, 40).concat(pick(inner, 24));
+}
+/** 후보 자리들을 작업자 여러 개로 나눠 계산 → 대수 가장 많은(검사 통과 우선) 자리 */
+async function searchCoreSpot(W, D) {
+  if (!state.plate) return null;
+  syncPlateMeta();
+  const cands = coreSpotCandidates(W, D);
+  if (!cands.length || typeof Worker === "undefined") return null;
+  const snap = structuredClone(state);
+  snap.cores = state.corePlaced ? snap.cores : [];
+  snap.variants = []; snap.stalls = [];
+  const n = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1));
+  stopGridPool();
+  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=381", import.meta.url), { type: "module" }));
+  busyLabel = `코어 놓을 자리 찾는 중… (${cands.length}곳 비교)`;
+  const chunks = Array.from({ length: n }, () => []);
+  cands.forEach((c, i) => chunks[i % n].push(c));
+  try {
+    const res = (await Promise.all(chunks.map((c, i) => (c.length ? callGridWorker(gridPool[i], "coreSpots", snap, [c]) : [])))).flat();
+    res.sort((p, q) => q.score - p.score);
+    return res[0] ? { x: res[0].x, y: res[0].y } : null;
+  } finally { stopGridPool(); }
+}
+$("core-resize2")?.addEventListener("click", () => setCoreSize($("core-w2").value, $("core-d2").value));
+$("core-size-chips")?.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-w]");
+  if (!b) return;
+  coreSizeTouched = true;
+  corePreviewOn = true;
+  $("core-w2").value = b.dataset.w;
+  $("core-d2").value = b.dataset.d;
+  renderCoreSection();
+});
+["core-w2", "core-d2"].forEach((id) => $(id)?.addEventListener("input", () => { coreSizeTouched = true; corePreviewOn = true; renderCoreSection(); }));
+$("core-list")?.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-i]");
+  if (!b) return;
+  const i = Number(b.dataset.i);
+  state.coreFlash = { index: i, until: performance.now() + 1800 };
+  selectCore(i);
+  selectItem({ type: "core", index: i });
+});
+function readCoreSpec() {
+  const n = (id) => Number($(id).value);
+  return { elevCount: n("core-elev-n"), stairCount: n("core-stair-n"), elevW: n("core-elev-w"), elevD: n("core-elev-d"), stairW: n("core-stair-w"), stairD: n("core-stair-d") };
+}
+["core-elev-n", "core-stair-n", "core-elev-w", "core-elev-d", "core-stair-w", "core-stair-d"].forEach((id) => $(id)?.addEventListener("change", () => {
+  const sp = readCoreSpec();
+  if (![sp.elevW, sp.elevD, sp.stairW, sp.stairD].every((v) => v > 0)) return;
+  setCoreSpec(state.coreIndex ?? 0, sp);
+}));
+document.querySelectorAll(".door-row button[data-door]").forEach((b) => b.addEventListener("click", () => setCoreDoor(state.coreIndex ?? 0, b.dataset.door)));
+$("core-spec-auto")?.addEventListener("click", () => setCoreSpec(state.coreIndex ?? 0, null));
+$("core-del2")?.addEventListener("click", () => deleteCoreAt(state.coreIndex ?? 0));
+/** 새 코어에 넣을 승강기·계단 수 */
+function newCoreSpec() {
+  // 크기는 보통 쓰는 값: 승강기 샤프트 2.2×2.4m, 계단실 2.6×5.0m (코어를 누르면 고칠 수 있음)
+  return { elevCount: Number($("new-elev-n")?.value || 0), stairCount: Number($("new-stair-n")?.value ?? 1), elevW: 2.2, elevD: 2.4, stairW: 2.6, stairD: 5.0 };
+}
+/** 정한 승강기·계단이 이 크기 코어에 들어가는지(문을 긴 변·짧은 변 어느 쪽에 둬도 되면 OK) */
+function sizeFits(w, d, spec) {
+  const c = { x: 0, y: 0, w, d, spec };
+  return coreSpecFit(c, "s").ok || coreSpecFit(c, "e").ok;
+}
+/** 정한 승강기·계단이 딱 들어가는 가장 작은 코어(문을 긴 변·짧은 변 둘 다 따져 작은 쪽) */
+function minimalCoreSize(spec) {
+  let best = null;
+  const r1 = (v) => Math.ceil(v * 10 - 1e-6) / 10;
+  ["s", "e"].forEach((side) => {
+    // side s: 문 벽 방향 = 가로(w). side e: 문 벽 방향 = 세로(d)
+    const probe = { x: 0, y: 0, w: 30, d: 30, spec };
+    const along = r1(coreSpecFit(probe, side).needAlong);
+    for (let depth = 3; depth <= 20; depth = Math.round((depth + 0.1) * 10) / 10) {
+      const c = side === "s" ? { x: 0, y: 0, w: along, d: depth, spec } : { x: 0, y: 0, w: depth, d: along, spec };
+      if (coreSpecFit(c, side).ok) {
+        const a = c.w * c.d;
+        if (!best || a < best.a - 1e-6) best = { w: c.w, d: c.d, a };
+        break;
+      }
+    }
+  });
+  return best;
+}
+/** 코어 크기 후보: ① 딱 들어가는 최소 크기 ② 그보다 너무 크지 않은 격자 칸 크기(벽 쪽 5m 미만 자투리 칸은 뺌) */
+function coreSizeOptions() {
+  if (!state.plate) return [];
+  const spec = newCoreSpec();
+  const out = [];
+  const min = minimalCoreSize(spec);
+  if (min) out.push({ ...min, cells: "최소" });
+  let g = null;
+  try { g = coreGridLines(state.plate); } catch (e) { g = null; }
+  if (g) {
+    const spans = (lines) => {
+      const set = new Map();
+      for (let i = 0; i < lines.length; i += 1) {
+        for (let k = 1; k <= 2 && i + k < lines.length; k += 1) {
+          let short = false;
+          for (let j = i; j < i + k; j += 1) if (lines[j + 1] - lines[j] < 5) short = true;
+          if (short) continue;
+          const v = Math.round((lines[i + k] - lines[i]) * 10) / 10;
+          if (v <= 22 && !set.has(v)) set.set(v, k);
+        }
+      }
+      return [...set.entries()].map(([v, k]) => ({ v, k }));
+    };
+    const xs = spans(g.gx); const ys = spans(g.gy);
+    const cap = min ? Math.max(min.a * 1.6, min.a + 30) : 160;   // 최소보다 너무 큰 칸 크기는 빼기
+    xs.forEach((X) => ys.forEach((Y) => {
+      const a = X.v * Y.v;
+      if (a > cap || Math.max(X.v, Y.v) / Math.min(X.v, Y.v) > 2.6) return;
+      if (!sizeFits(X.v, Y.v, spec)) return;
+      out.push({ w: X.v, d: Y.v, a, cells: `격자 ${X.k}×${Y.k}칸` });
+    }));
+  }
+  const floor = Math.max(1, (state.plate.width || 1) * (state.plate.depth || 1));
+  out.forEach((o) => { o.pct = Math.round((o.a / floor) * 1000) / 10; });
+  return [out[0]].filter(Boolean).concat(out.slice(1).sort((p, q) => p.a - q.a)).slice(0, 6);
+}
+["new-elev-n", "new-stair-n"].forEach((id) => $(id)?.addEventListener("change", () => { coreSizeTouched = false; corePreviewOn = true; renderCoreSection(); }));
+let coreSizeTouched = false;
+let corePreviewOn = false;   // 크기 칩을 고르거나 숫자를 바꾸면 켜짐 → 평면에 놓일 자리 깜빡임, 「코어 추가」하면 꺼짐   // 사용자가 크기를 직접 고르거나 넣었는지(안 했으면 격자 바뀔 때 추천 크기로 다시 채움)
+function renderCoreSection() {
+  const chips = $("core-size-chips");
+  if (!chips) return;
+  const opts = coreSizeOptions();
+  {
+    const sp = newCoreSpec();
+    const h = $("core-size-hint");
+    if (h) h.textContent = opts.length
+      ? `승강기 ${sp.elevCount}대 · 계단 ${sp.stairCount}개가 들어가는 크기 — 맨 앞이 딱 맞는 최소 크기, 뒤는 기둥 칸에 맞춘 크기`
+      : `승강기 ${sp.elevCount}대 · 계단 ${sp.stairCount}개가 들어가는 격자 칸 크기가 없어요 — 가로·세로를 직접 넣으세요.`;
+  }
+  if (!coreSizeTouched && opts.length) {
+    const pick = opts[0];   // 딱 들어가는 최소 크기
+    $("core-w2").value = pick.w; $("core-d2").value = pick.d;
+  }
+  const W = Number($("core-w2").value); const D = Number($("core-d2").value);
+  // 아직 코어가 없으면 늘, 있으면 크기를 새로 고른 동안만 놓일 자리를 깜빡여 보여 줌
+  state.corePreview = wizardSlide === 6 && (corePreviewOn || !state.corePlaced) ? previewCoreSized(W, D) : null;
+  chips.innerHTML = opts.map((o) => `<button type="button" class="grid-chip${Math.abs(o.w - W) < 0.05 && Math.abs(o.d - D) < 0.05 ? " on" : ""}" data-w="${o.w}" data-d="${o.d}"><div><b>${o.w} × ${o.d}m</b></div><span>${Math.round(o.a)}㎡ · 바닥의 ${o.pct}% · ${o.cells}</span></button>`).join("");
+  const placed = Boolean(state.corePlaced);
+  const list = $("core-list");
+  list.innerHTML = placed ? state.cores.map((c, i) => `<button type="button" data-i="${i}" class="${i === state.coreIndex ? "on" : ""}">${coreLabel(c, i)} · ${Math.round(c.w * 10) / 10}×${Math.round(c.d * 10) / 10}</button>`).join("") : "";
+  $("core-resize2").hidden = !placed;
+  const note = $("core-place-note");
+  note.classList.remove("error");
+  note.textContent = placed ? "코어를 끌어서 옮길 수 있어요(크기 그대로 기둥 줄에 맞춤). 코어를 누르면 안쪽 크기를 정해요." : "아직 코어가 없어요. 크기를 고르고 「코어 추가」를 누르세요.";
+  const det = $("core-detail");
+  const core = placed ? state.cores[state.coreIndex ?? 0] : null;
+  det.hidden = !core || core.kind === "stair";
+  if (!core || core.kind === "stair") return;
+  const side = pickCoreDoorSide(core, state.aisles, state.plate && state.plate.blockRects);
+  const sp = coreSpecOf(core, side);
+  $("core-detail-title").textContent = `${coreLabel(core, state.coreIndex ?? 0)} 안쪽 (${Math.round(core.w * 10) / 10}×${Math.round(core.d * 10) / 10}m)${core.spec ? "" : " · 자동 크기"}`;
+  const put = (id, v) => { const el = $(id); if (el && document.activeElement !== el) el.value = String(Math.round(v * 100) / 100); };
+  if (document.activeElement !== $("core-elev-n")) $("core-elev-n").value = String(sp.elevCount);
+  if (document.activeElement !== $("core-stair-n")) $("core-stair-n").value = String(sp.stairCount);
+  put("core-elev-w", sp.elevW); put("core-elev-d", sp.elevD); put("core-stair-w", sp.stairW); put("core-stair-d", sp.stairD);
+  document.querySelectorAll(".door-row button[data-door]").forEach((b) => {
+    const ok = coreSpecFit(core, b.dataset.door).ok;
+    b.classList.toggle("on", b.dataset.door === side);
+    b.classList.toggle("nofit", !ok);
+    b.title = ok ? "이 면에 문을 내면 승강기·계단이 들어가요" : "이 면에 문을 내면 승강기·계단이 안 들어가요";
+  });
+  const fit = coreSpecFit(core, side);
+  const fn = $("core-fit-note");
+  fn.classList.toggle("error", !fit.ok);
+  fn.textContent = fit.ok
+    ? `들어가요 — 문 벽 방향 ${fit.needAlong.toFixed(1)}/${fit.along.toFixed(1)}m, 깊이 ${fit.needDepth.toFixed(1)}/${fit.depth.toFixed(1)}m`
+    : `코어보다 커요 — 문 벽 방향 필요 ${fit.needAlong.toFixed(1)}m(코어 ${fit.along.toFixed(1)}m), 깊이 필요 ${fit.needDepth.toFixed(1)}m(코어 ${fit.depth.toFixed(1)}m). 빨간 글씨가 아닌 쪽으로 문을 옮기거나, 줄이거나 코어를 키우세요.`;
+}
 $("auto-core").addEventListener("click", () => busy("코어 자리 찾는 중…", autoPlaceCore, "autoCore"));
 $("close-core-dialog").addEventListener("click", () => $("core-dialog").close());
 fields.coreW.addEventListener("change", () => updateCore({ w: Number(fields.coreW.value) }));
@@ -1314,7 +1544,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=365")
+    sceneMount = import("./scene.js?v=381")
       .then((module) => {
         const root = $("scene-root");
         if (!root) throw new Error("scene-root 없음");
@@ -1686,9 +1916,6 @@ function render() {
   $("plate-preview").innerHTML = statList([
     ["주차장 크기", `${formatMeters(state.parkWidth)} × ${formatMeters(state.parkDepth)}`],
     ["주차장 면적", formatArea(area)],
-    ["기둥 중심 간격", (state.spansX || state.spansY)
-      ? `가로 ${state.spansX || formatMeters(state.columnSpacing)} / 세로 ${state.spansY || formatMeters(state.columnSpacing)}`
-      : (state.columnAuto ? "코어 단계에서 고름" : formatMeters(state.columnSpacing))],
   ]);
   $("type-readout").textContent = typeReadout();
   {
@@ -1699,7 +1926,7 @@ function render() {
       const sy = spanText($("spans-y").value);
       const custom = $("spans-x").value.trim() || $("spans-y").value.trim() ? ` · 가로 ${sx} · 세로 ${sy}` : "";
       void custom; void bayText;
-      $("column-summary").textContent = `기둥 단면 ${$("column-size").value}m${Number($("min-clear").value) ? ` · 이격 ${$("min-clear").value}m` : ""} · 기둥 간격은 코어 단계에서 고름`;
+      $("column-summary").textContent = `기둥 단면 ${$("column-size").value}m${Number($("min-clear").value) ? ` · 이격 ${$("min-clear").value}m` : ""}`;
     }
   }
   setIfIdle(fields.width, state.parkWidth);
@@ -1911,6 +2138,7 @@ function render() {
         ? `자동 탐색: 가운데 ${state.coreSearch.before}대 → ${state.coreSearch.after}대`
         : state.coreAuto ? "자동 탐색: 지금 자리가 가장 많음" : "직접 둔 자리";
     setIfIdle(fields.coreW, state.core.w);
+    renderCoreSection();
     setIfIdle(fields.coreD, state.core.d);
     setIfIdle(fields.coreX, state.core.x);
     setIfIdle(fields.coreY, state.core.y);
@@ -2191,7 +2419,7 @@ function buildDemandForm() {
   $("open-demand-dialog").addEventListener("click", () => $("demand-dialog").showModal());
   $("close-demand-dialog").addEventListener("click", () => { $("demand-dialog").close(); render(); });
   // 기둥 고급 설정 창
-  $("open-column-dialog").addEventListener("click", () => $("column-dialog").showModal());
+  $("open-column-dialog").addEventListener("click", () => { $("column-dialog").classList.add("no-spans"); $("column-dialog").showModal(); });
   $("open-disabled-dialog").addEventListener("click", () => $("disabled-dialog").showModal());
   $("close-disabled-dialog").addEventListener("click", () => { $("disabled-dialog").close(); render(); });
   $("close-column-dialog").addEventListener("click", () => {
