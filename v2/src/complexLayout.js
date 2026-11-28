@@ -4,8 +4,8 @@
  * layout.js와 순환 import를 피하려고 상수·겹침 계산은 여기에 둔다.
  * 근거·목표: docs/redesign/redesign-plan.md
  */
-import { assignStallTypes, stallRuleTargets, tallyStallTypes } from "./stallTypes.js?v=362";
-import { polygonFromPlate, rectInsidePolygon, isRectangularPlate } from "./polygon.js?v=362";
+import { assignStallTypes, stallRuleTargets, tallyStallTypes } from "./stallTypes.js?v=365";
+import { polygonFromPlate, rectInsidePolygon, isRectangularPlate } from "./polygon.js?v=365";
 
 const AISLE = 6;
 const STALL_W = 2.5;

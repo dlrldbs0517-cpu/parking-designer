@@ -1,23 +1,23 @@
-import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay } from "./layout.js?v=362";
-import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=362";
-import { drawThumb, invalidatePlanFit, mountPlan } from "./plan.js?v=362";
-import { stallRuleTargets } from "./stallTypes.js?v=362";
+import { CLEAR_HEIGHT, SLAB_T, clearHeightOf, requiredClearHeight, minStraightRampLength, rampPositionCheck, rampShape, rampTransitions, recommendCoreCells, stallsPerBay, edgeGap } from "./layout.js?v=365";
+import { housingAreaDivisor, uses, zoneFactors, zoneUseStatus } from "./parkingRules.js?v=365";
+import { drawThumb, invalidatePlanFit, mountPlan } from "./plan.js?v=365";
+import { stallRuleTargets } from "./stallTypes.js?v=365";
 import {
   plateDimsFromPolygon, presetChamferRect, presetL, presetTrapezoid, presetU,
   rectPolygon, validatePolygon, normalizePolygon, offsetPolygon, polygonArea, edgeLengths,
-} from "./polygon.js?v=362";
-import { eumLandUrl, localizer, lookupZoning, lookupZoningAt, outerRings, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=362";
-import { openSketch, closeSketch, sketchOpen } from "./sketch.js?v=362";
-import { addBuilding, addCore, addStairCore, applyVariant, autoPlaceCore, buildingOfCore, clearParkPolygon, coreLabel, currentStallRules, demandResult, editRampModules, emit, generatePlate, loadReference, optimizeLayout, parseSpans, placeOverlapExample, placeSplitExample, pinLowerRampOverrides, preparePlateShell, readyFor3d, issueGroups, rampFallback, rampModuleInfo, recommendLayouts, removeBuilding, removeSelection, rotateSelectedRamp, totalStallShortages, gridCombos, adoptGridResults, axisGridCandidates, applyGridChoice, setGridOptions, gridKeyNow, snapAllCores, selectCore, selectItem, selectedOpening, selectedRamp, setParkPolygon, setReveal, setSiteType, setStep, setTool, state, subscribe, summary, syncPlateMeta, updateBuilding, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState, rebuildLayout } from "./state.js?v=362";
+} from "./polygon.js?v=365";
+import { eumLandUrl, localizer, lookupZoning, lookupZoningAt, outerRings, parcelAt, regionFromAddress, roadAccess } from "./zoning.js?v=365";
+import { openSketch, closeSketch, sketchOpen } from "./sketch.js?v=365";
+import { addBuilding, addCore, addStairCore, applyVariant, autoPlaceCore, buildingOfCore, clearParkPolygon, coreLabel, currentStallRules, demandResult, editRampModules, emit, generatePlate, loadReference, optimizeLayout, parseSpans, placeOverlapExample, placeSplitExample, pinLowerRampOverrides, preparePlateShell, readyFor3d, issueGroups, rampFallback, rampModuleInfo, recommendLayouts, removeBuilding, removeSelection, rotateSelectedRamp, totalStallShortages, gridCombos, adoptGridResults, axisGridCandidates, applyGridChoice, setGridOptions, gridKeyNow, snapAllCores, centeredGrid, selectCore, selectItem, selectedOpening, selectedRamp, setParkPolygon, setReveal, setSiteType, setStep, setTool, state, subscribe, summary, syncPlateMeta, updateBuilding, updateCore, updateCoreArea, updateEntranceWidth, updateRampSize, updateSiteMargins, plateFromState, rebuildLayout } from "./state.js?v=365";
 let lastFitSlide = 0;   // 평면 카메라 맞춤을 마지막으로 한 단계
 
 // 시트·DXF·주변지도는 클릭 시에만 불러 초기 로딩을 줄인다.
 let sheetMod = null;
 let dxfMod = null;
 let contextMod = null;
-const loadSheet = () => (sheetMod ||= import("./sheet.js?v=362"));
-const loadDxf = () => (dxfMod ||= import("./dxfExport.js?v=362"));
-const loadContext = () => (contextMod ||= import("./context.js?v=362"));
+const loadSheet = () => (sheetMod ||= import("./sheet.js?v=365"));
+const loadDxf = () => (dxfMod ||= import("./dxfExport.js?v=365"));
+const loadContext = () => (contextMod ||= import("./context.js?v=365"));
 async function closeContext() {
   const m = await loadContext();
   return m.closeContext();
@@ -305,8 +305,23 @@ $("grid-recalc")?.addEventListener("click", () => {
 });
 $("grid-manual")?.addEventListener("click", () => {
   state.columnAuto = false;
-  $("open-column-dialog")?.click();
+  if ($("column-auto")) $("column-auto").checked = false;
+  // 지금 쓰는 격자를 입력칸에 채워 두고 연다
+  if ($("spans-x")) $("spans-x").value = state.spansX || "";
+  if ($("spans-y")) $("spans-y").value = state.spansY || "";
+  $("column-dialog").showModal();
 });
+/** 코어 단계에서 직접 입력한 간격을 평면 격자에 반영하고 코어를 새 격자 칸에 맞춤 */
+function applyManualSpans() {
+  if (!state.plate) return;
+  const sx = parseSpans(state.spansX);
+  const sy = parseSpans(state.spansY);
+  if (sx.error || sy.error) return;
+  const def = [Number(state.columnSpacing) || 8.1];
+  state.plate = { ...state.plate, spansX: sx.values || def, spansY: sy.values || def };
+  state.gridChosen = -1;
+  snapAllCores();
+}
 function renderGridChoices() {
   const box = $("grid-choices");
   if (!box) return;
@@ -404,7 +419,7 @@ let workerSeq = 0;
 function runInWorker(op, args = []) {
   return new Promise((resolve, reject) => {
     try {
-      if (!worker) worker = new Worker(new URL("./worker.js?v=362", import.meta.url), { type: "module" });
+      if (!worker) worker = new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" });
     } catch (error) { reject(error); return; }
     const id = ++workerSeq;
     let snap;
@@ -445,7 +460,7 @@ async function searchGridsParallel() {
   snap0.variants = []; snap0.stalls = [];
   const n = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1));
   stopGridPool();
-  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=362", import.meta.url), { type: "module" }));
+  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" }));
   const runBatch = async (combos) => {
     const chunks = Array.from({ length: n }, () => []);
     combos.forEach((c, i) => chunks[i % n].push(c));
@@ -474,9 +489,21 @@ async function searchGridsParallel() {
   mx.forEach((cx) => stage2.push({ cx: strip(cx), cy: by }));
   my.forEach((cy) => stage2.push({ cx: bx, cy: strip(cy) }));
   mx.slice(0, 2).forEach((cx) => my.slice(0, 2).forEach((cy) => stage2.push({ cx: strip(cx), cy: strip(cy) })));
+  // 벽에서 띄운 격자(첫 기둥 줄을 벽에서 1.2~6m 안쪽 — 외벽·캔틸레버로 받음): 1단계 1등 간격 기준
+  {
+    const one = (c) => (c && c.seq && c.seq.length === 1 ? c.seq[0] : null);
+    const ox = one(bx) ? centeredGrid(one(bx), state.plate.width - 2 * edgeGap(state.plate)) : null;
+    const oy = one(by) ? centeredGrid(one(by), state.plate.depth - 2 * edgeGap(state.plate)) : null;
+    const extra = [];
+    if (ox) extra.push({ cx: ox, cy: by });
+    if (oy) extra.push({ cx: bx, cy: oy });
+    if (ox && oy) extra.push({ cx: ox, cy: oy });
+    stage2.unshift(...extra);   // 앞에 둬서 큰 평면에서 줄여도 남게
+  }
   // 1단계가 오래 걸린 큰 평면은 섞은 간격을 줄여서
   const took = Date.now() - tStart;
-  const stage2b = (huge || took > LIMIT) ? [] : (took > LIMIT / 2 ? stage2.slice(0, Math.max(2, Math.ceil(stage2.length / 3))) : stage2);
+  const nExtra = stage2.filter((c) => /띄움/.test(c.cx.label) || /띄움/.test(c.cy.label)).length;
+  const stage2b = (huge || took > LIMIT) ? stage2.slice(0, nExtra) : (took > LIMIT / 2 ? stage2.slice(0, Math.max(nExtra + 2, Math.ceil(stage2.length / 3))) : stage2);
   busyLabel = `기둥 격자 찾는 중… (2/3 섞은 간격 ${stage2b.length}가지)`;
   const s2 = stage2b.length ? await runBatch(stage2b) : [];
   // 3단계(확인): 상위 6개 격자는 코어를 격자 칸에 맞춰 고정한 채 다시 계산 → 실제 놓일 모양 기준으로 순위
@@ -499,7 +526,7 @@ async function recommendParallel() {
   const n = Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 1));
   const snap = structuredClone(state);
   stopGridPool();
-  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=362", import.meta.url), { type: "module" }));
+  gridPool = Array.from({ length: n }, () => new Worker(new URL("./worker.js?v=365", import.meta.url), { type: "module" }));
   const runBatch = async (combos) => {
     const chunks = Array.from({ length: n }, () => []);
     combos.forEach((c, i) => chunks[i % n].push(c));
@@ -1287,7 +1314,7 @@ function playBuild() {
 
 async function ensureScene() {
   if (!sceneMount) {
-    sceneMount = import("./scene.js?v=362")
+    sceneMount = import("./scene.js?v=365")
       .then((module) => {
         const root = $("scene-root");
         if (!root) throw new Error("scene-root 없음");
@@ -1661,8 +1688,7 @@ function render() {
     ["주차장 면적", formatArea(area)],
     ["기둥 중심 간격", (state.spansX || state.spansY)
       ? `가로 ${state.spansX || formatMeters(state.columnSpacing)} / 세로 ${state.spansY || formatMeters(state.columnSpacing)}`
-      : (state.columnAuto ? "자동 (추천에서 고름)" : formatMeters(state.columnSpacing))],
-    ["구간당 주차", `${bay.count}대 · 이격 ${bay.gap.toFixed(2)}m`],
+      : (state.columnAuto ? "코어 단계에서 고름" : formatMeters(state.columnSpacing))],
   ]);
   $("type-readout").textContent = typeReadout();
   {
@@ -1672,7 +1698,8 @@ function render() {
       const sx = spanText($("spans-x").value);
       const sy = spanText($("spans-y").value);
       const custom = $("spans-x").value.trim() || $("spans-y").value.trim() ? ` · 가로 ${sx} · 세로 ${sy}` : "";
-      $("column-summary").textContent = `기둥 ${$("column-size").value}m · ${bayText}${Number($("min-clear").value) ? ` · 이격 ${$("min-clear").value}m` : ""}${custom}`;
+      void custom; void bayText;
+      $("column-summary").textContent = `기둥 단면 ${$("column-size").value}m${Number($("min-clear").value) ? ` · 이격 ${$("min-clear").value}m` : ""} · 기둥 간격은 코어 단계에서 고름`;
     }
   }
   setIfIdle(fields.width, state.parkWidth);
@@ -2167,7 +2194,13 @@ function buildDemandForm() {
   $("open-column-dialog").addEventListener("click", () => $("column-dialog").showModal());
   $("open-disabled-dialog").addEventListener("click", () => $("disabled-dialog").showModal());
   $("close-disabled-dialog").addEventListener("click", () => { $("disabled-dialog").close(); render(); });
-  $("close-column-dialog").addEventListener("click", () => { $("column-dialog").close(); render(); });
+  $("close-column-dialog").addEventListener("click", () => {
+    $("column-dialog").close();
+    if (wizardSlide === 6 && !state.columnAuto) { applyManualSpans(); emit(); }
+    render();
+  });
+  // 설정 창은 3단계 슬라이드 안에 있어서, 다른 단계에서 열면 안 보임 → body 바로 아래로 옮김
+  ["column-dialog", "disabled-dialog", "demand-dialog"].forEach((id) => { const d = $(id); if (d && d.parentElement !== document.body) document.body.appendChild(d); });
   // 크기 추천: 법정 대수 × 1대당 면적 ÷ 계획 지하층 수 → 기둥 간격 배수로 맞춘 가로·세로를 칸에 채움
   $("suggest-size").addEventListener("click", () => {
     state.sizeSet = true;

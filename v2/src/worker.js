@@ -1,5 +1,5 @@
 // 무거운 배치 계산(추천 3안·코어 자리 찾기)을 화면과 따로 돌린다 — "페이지가 응답하지 않습니다" 방지.
-import { state, recommendLayouts, autoPlaceCore, scoreGridBatch, fullGridVariants, verifyGridBatch } from "./state.js?v=362";
+import { state, recommendLayouts, autoPlaceCore, scoreGridBatch, fullGridVariants, verifyGridBatch } from "./state.js?v=365";
 
 const ops = { recommend: recommendLayouts, autoCore: autoPlaceCore, gridBatch: scoreGridBatch, gridFull: fullGridVariants, gridVerify: verifyGridBatch };
 

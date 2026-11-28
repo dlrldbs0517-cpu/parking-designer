@@ -1,18 +1,18 @@
-import { chargerRect, boltPoints } from "./stallMarks.js?v=362";
+import { chargerRect, boltPoints } from "./stallMarks.js?v=365";
 import {
   coreInterior, edgePoint, pickCoreDoorSide, pickEdge, rampFootprint, rampShape,
-  rampsForLevel, siteMarginsOf, stairCoreInterior, coreInteriorOf, rampOutsidePlate, coreGridLines,
-} from "./layout.js?v=362";
+  rampsForLevel, siteMarginsOf, stairCoreInterior, coreInteriorOf, rampOutsidePlate, coreGridLines, rampKeepOut,
+} from "./layout.js?v=365";
 import {
   analyzeOnPlate, buildChain, slopePlan, usesModuleLayout,
-} from "./rampModules.js?v=362";
+} from "./rampModules.js?v=365";
 import {
   polygonFromPlate, snapPoint, edgeLengths, polygonArea,
-} from "./polygon.js?v=362";
+} from "./polygon.js?v=365";
 import {
   emit, moveLowerRamp, moveOpening, moveRamp, moveRampFree, placeOpening, placeRamp,
   selectCore, selectItem, setParkPolygon, state, subscribe, updateCore,
-} from "./state.js?v=362";
+} from "./state.js?v=365";
 
 const camera = { x: 0, y: 0, scale: 12 };
 let fittedKey = "";
@@ -286,9 +286,14 @@ export function mountPlan(canvas) {
         ctx.setLineDash([]);
         const cw = plate.columnWidth || 0.5; const cd = plate.columnDepth || cw;
         ctx.fillStyle = "rgba(44,40,36,0.75)";
+        // 엔진과 같게: 외벽 줄 위(외벽이 받음)·램프와 진입·도착 6m 안에는 기둥을 세우지 않는다
+        const keep = rampKeepOut(state.ramps, plate);
         gx.forEach((x) => gy.forEach((y) => {
+          if (x <= 0.7 || y <= 0.7 || x >= plate.width - 0.7 || y >= plate.depth - 0.7) return;
+          const col = { x: x - cw / 2, y: y - cd / 2, w: cw, d: cd };
+          if (keep.some((b) => col.x < b.x + b.w && col.x + col.w > b.x && col.y < b.y + b.d && col.y + col.d > b.y)) return;
           const inCore = state.cores.some((c) => x > c.x + 0.05 && x < c.x + c.w - 0.05 && y > c.y + 0.05 && y < c.y + c.d - 0.05);
-          if (!inCore) ctx.fillRect(x - cw / 2, y - cd / 2, cw, cd);
+          if (!inCore) ctx.fillRect(col.x, col.y, cw, cd);
         }));
         ctx.restore();
       } catch (e) { /* 격자 없음 */ }

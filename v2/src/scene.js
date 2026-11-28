@@ -4,10 +4,10 @@ import {
   CLEAR_HEIGHT, CURB_H, CURB_W, FLOOR_H, LINE_W, WALL_T,
   coreInterior, coreInteriorOf, pickCoreDoorSide, rampFootprint, rampShape, rampsForLevel,
   siteMarginsOf, stairCoreInterior,
-} from "./layout.js?v=362";
-import { analyzeOnPlate, rampMesh, slopePlan } from "./rampModules.js?v=362";
-import { isLegacyEquivalent, state, subscribe, summary } from "./state.js?v=362";
-import { chargerRect } from "./stallMarks.js?v=362";
+} from "./layout.js?v=365";
+import { analyzeOnPlate, rampMesh, slopePlan } from "./rampModules.js?v=365";
+import { isLegacyEquivalent, state, subscribe, summary } from "./state.js?v=365";
+import { chargerRect } from "./stallMarks.js?v=365";
 
 const DRAW_CAP = 12;
 let renderer;

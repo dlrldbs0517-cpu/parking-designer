@@ -1,13 +1,13 @@
-import { chargerRect } from "./stallMarks.js?v=362";
+import { chargerRect } from "./stallMarks.js?v=365";
 /**
  * AutoCAD DXF(AC1015) → DWG(R2000) 내보내기.
  * 단위: 평면 m. unitScale — mm면 ×1000.
  * 한글: \U+XXXX 이스케이프, 스타일 malgun.ttf.
  * 레이어별 ACI 색으로 기둥·코어·주차칸 종류를 구분한다.
  */
-import { closedRing, polygonFromPlate } from "./polygon.js?v=362";
-import { rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=362";
-import { buildChain } from "./rampModules.js?v=362";
+import { closedRing, polygonFromPlate } from "./polygon.js?v=365";
+import { rampFootprint, rampShape, siteMarginsOf } from "./layout.js?v=365";
+import { buildChain } from "./rampModules.js?v=365";
 
 /** [name, ACI color, linetype] — 색은 모두 다르게 (주차 종류·기둥·코어 구분) */
 const LAYERS = [

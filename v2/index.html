@@ -6,7 +6,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>주차장 설계</title>
-    <link rel="stylesheet" href="styles.css?v=362" />
+    <link rel="stylesheet" href="styles.css?v=365" />
     <script type="importmap">
       {
         "imports": {
@@ -209,8 +209,8 @@
 
 
         <section class="slide" data-slide="3" hidden>
-          <h2>크기 · 기둥 · 층고</h2>
-          <p class="slide-lead">주차장 외곽을 그리고 층고·기둥 간격을 정합니다.</p>
+          <h2>크기 · 층고</h2>
+          <p class="slide-lead">주차장 외곽을 그리고 층고를 정합니다. 기둥 간격은 코어 단계에서 골라요.</p>
           <div id="map-draw-box" class="map-draw-box">
             <button type="button" id="plate-map-draw" class="primary">외곽 그리기</button>
             <p class="hint" id="plate-draw-stats"></p>
@@ -266,12 +266,12 @@
               층고 (m)
               <input id="floor-height" type="number" min="2.6" max="6" step="0.05" value="3.2" />
             </label>
-            <label>
+            <label hidden><!-- 기둥 간격은 코어 단계(기둥 격자)에서 정함 -->
               기둥 간격 (m) <span class="info" tabindex="0" title="기둥 중심 간격. 8.1m·기둥 0.5m면 기둥 사이 7.6m에 2.5m 칸 3대(확장형 2.6m 1대 포함 가능).">ⓘ</span>
               <input id="column-spacing" type="number" min="5" max="12" step="0.1" value="8.1" />
             </label>
           </div>
-          <label class="check-row"><input id="column-auto" type="checkbox" checked /> 기둥 간격 자동 — 추천 단계에서 2대 5.5 · 3대 8.1 · 4대 10.5 · 8.2를 섞어 대수가 가장 많은 격자를 고릅니다</label>
+          <label class="check-row" hidden><input id="column-auto" type="checkbox" checked /> 기둥 간격 자동 — 추천 단계에서 2대 5.5 · 3대 8.1 · 4대 10.5 · 8.2를 섞어 대수가 가장 많은 격자를 고릅니다</label>
           <div class="split column-row">
             <p id="clear-readout" class="hint">차로 유효높이 2.3m 이상</p>
             <button type="button" id="open-column-dialog" class="ghost tiny">상세 입력</button>
@@ -279,6 +279,7 @@
           <p id="column-summary" class="hint"></p>
         <dialog id="column-dialog" class="settings-dialog">
           <h3>층고·기둥 상세 입력</h3>
+          <p class="hint">기둥 간격은 코어 단계에서 격자 후보로 고르거나 「직접 입력」으로 넣으세요.</p>
           <h4>층고</h4>
             <div class="choice compact" id="floor-height-choice" role="group" aria-label="층고">
             <button type="button" data-value="2.7">2.7</button>
@@ -769,7 +770,7 @@
         <button type="button" id="wizard-next" class="primary">다음</button>
       </nav>
       <select id="circulation" hidden><option value="ccw" selected>반시계</option></select>
-      <p class="note"><span class="hint">버전 2026-11-27 · r362</span></p>
+      <p class="note"><span class="hint">버전 2026-11-27 · r365</span></p>
     </aside>
     </div>
 
@@ -782,7 +783,7 @@
     <button id="plan-expand-hit" type="button" hidden>expand</button>
     <button id="collapse-plan" type="button" hidden>접기</button>
 
-    <script type="module" src="src/main.js?v=362"></script>
+    <script type="module" src="src/main.js?v=365"></script>
     <div id="busy" class="busy" hidden role="status" aria-live="polite">
       <div class="busy-box"><span class="spinner"></span><span id="busy-text">평면 만드는 중…</span><button type="button" id="busy-cancel" class="ghost tiny" hidden>취소</button></div>
     </div>

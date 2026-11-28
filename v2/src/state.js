@@ -1,5 +1,5 @@
-import { calculateDemand, emptyDemand } from "./demand.js?v=362";
-import { stallRuleTargets } from "./stallTypes.js?v=362";
+import { calculateDemand, emptyDemand } from "./demand.js?v=365";
+import { stallRuleTargets } from "./stallTypes.js?v=365";
 import {
   basementCount,
   bestLayoutFor,
@@ -27,7 +27,7 @@ import {
   stairCoreInterior,
   towerBlockRects,
   towerTransferNotes,
-} from "./layout.js?v=362";
+} from "./layout.js?v=365";
 import {
   addModule as chainAddModule,
   applyPlateMeta,
@@ -41,7 +41,7 @@ import {
   slopePlan,
   analyzeOnPlate,
   buildChain,
-} from "./rampModules.js?v=362";
+} from "./rampModules.js?v=365";
 import {
   normalizePolygon,
   outsideBlockRects,
@@ -50,7 +50,7 @@ import {
   polygonFromPlate,
   rectPolygon,
   validatePolygon,
-} from "./polygon.js?v=362";
+} from "./polygon.js?v=365";
 
 export const state = {
   step: 1,
@@ -251,9 +251,12 @@ export function parseSpans(text) {
   if (!raw) return { values: null, error: null };
   const parts = raw.split(/[,，\s]+/).filter(Boolean);
   const values = [];
-  for (const part of parts) {
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
     const n = Number(part);
     if (!Number.isFinite(n)) return { values: null, error: `"${part}"는 숫자가 아닙니다` };
+    // 첫 간격은 벽에서 띄운 거리(캔틸레버)로 1~6m도 허용 — 뒤에 반복 간격이 있을 때만
+    if (i === 0 && parts.length > 1 && n >= 1 && n <= 6) { values.push(n); continue; }
     if (n < 3 || n > 15) return { values: null, error: `${n}m는 3~15m 범위 밖입니다` };
     values.push(n);
   }
@@ -823,6 +826,22 @@ export function axisGridCandidates(L) {
   }
   return uni.concat(top);
 }
+/**
+ * 벽에서 띄운 일정 간격: 첫·끝 기둥 줄을 벽에서 o만큼 안쪽으로(그 사이는 외벽·캔틸레버로 받음, 6m 이하).
+ * 기둥 줄이 평면 가운데에 오게 양쪽 띄움을 같게 한다.
+ */
+export function centeredGrid(s, L) {
+  // L: 기둥 격자를 까는 안쪽 길이(벽 두께 뺀 길이). 끝 띄움이 2.5m 미만이면 마지막 줄이 벽으로 합쳐지므로 2.5m 이상만
+  if (!(s > 0) || !(L > s)) return null;
+  for (let k = Math.floor(L / s); k >= 1; k -= 1) {
+    const o = Math.round(((L - k * s) / 2) * 10) / 10;
+    if (o > 6) break;          // 캔틸레버 6m 넘으면 안 됨
+    if (o < 2.5) continue;
+    return { seq: [o, s], label: `${s} 반복 (벽에서 ${o}m 띄움)` };
+  }
+  return null;
+}
+
 /** 돌려 볼 가로×세로 조합(어림으로 미리 걸러냄) */
 export function gridCombos(plate = state.plate) {
   const xs = axisGridCandidates(plate.width);

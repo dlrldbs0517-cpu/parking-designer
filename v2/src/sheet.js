@@ -1,10 +1,10 @@
-import { chargerRect } from "./stallMarks.js?v=362";
+import { chargerRect } from "./stallMarks.js?v=365";
 import {
   AISLE, FLOOR_H, RAMP_SLOPE_STRAIGHT, coreInterior, coreInteriorOf, pickCoreDoorSide,
   rampFootprint, siteMarginsOf, stairCoreInterior,
-} from "./layout.js?v=362";
-import { buildChain, slopePlan } from "./rampModules.js?v=362";
-import { polygonFromPlate } from "./polygon.js?v=362";
+} from "./layout.js?v=365";
+import { buildChain, slopePlan } from "./rampModules.js?v=365";
+import { polygonFromPlate } from "./polygon.js?v=365";
 
 const EDGE = { n: "북", e: "동", s: "남", w: "서" };
 
